@@ -1,14 +1,27 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { CreateMemberDto } from './dto/create-member.dto';
-import { UpdateMemberDto } from './dto/update-member.dto';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import * as bcrypt from "bcrypt";
+import { PrismaService } from "../../prisma/prisma.service";
+
+import { CreateMemberDto } from "./dto/create-member.dto";
+import { UpdateMemberDto } from "./dto/update-member.dto";
 
 function ageFrom(iso: string): number {
   const today = new Date();
   const dob = new Date(iso);
+
   let age = today.getFullYear() - dob.getFullYear();
+
   const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+
   return age;
 }
 
@@ -16,68 +29,308 @@ function ageFrom(iso: string): number {
 export class MembersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Note: EVERY method takes gymId and filters by it, so it is impossible
-  // to read or touch a member from another gym.
+  // ============================================================
+  // CREATE MEMBER
+  // ============================================================
+  //
+  // Creates:
+  //
+  // User
+  //   └── Profile
+  //   └── Member
+  //
+  // User:
+  //   - email
+  //   - passwordHash
+  //   - role
+  //   - gymId
+  //
+  // Profile:
+  //   - firstName
+  //   - lastName
+  //   - phone
+  //
+  // Member:
+  //   - birthDate
+  //   - guardian information
+  //   - status
+  // ============================================================
 
   async create(gymId: string, dto: CreateMemberDto) {
-    // VALIDATION: minor (business rule)
     if (dto.birthDate && ageFrom(dto.birthDate) < 18) {
       if (!dto.guardianName || !dto.guardianPhone) {
-        throw new BadRequestException('Member is a minor: guardian info is required.');
+        throw new BadRequestException(
+          "Member is a minor: guardian info is required.",
+        );
       }
     }
-    try {
-      return await this.prisma.member.create({
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        gymId,
+        email: dto.email,
+      },
+    });
+
+    if (existingUser) {
+      throw new ConflictException(
+        "That email is already registered in this gym.",
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password ?? "12345678", 12);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
         data: {
           gymId,
-          fullName: dto.fullName,
-          phone: dto.phone,
           email: dto.email,
+          passwordHash,
+          role: "MEMBER",
+          profile: {
+            create: {
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              phone: dto.phone,
+              gymId,
+            },
+          },
+        },
+      });
+
+      const member = await tx.member.create({
+        data: {
+          gymId,
+          userId: user.id,
           birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
           guardianName: dto.guardianName,
           guardianPhone: dto.guardianPhone,
         },
+        include: {
+          user: {
+            include: {
+              profile: true,
+            },
+          },
+        },
       });
-    } catch (e: any) {
-      // VALIDATION: already exists (hits @@unique([gymId, phone/email]))
-      if (e.code === 'P2002') {
-        throw new ConflictException('That member is already registered in this gym.');
-      }
-      throw e;
-    }
+
+      return member;
+    });
+
+    return {
+      id: result.id,
+      userId: result.userId,
+      email: result.user.email,
+      firstName: result.user.profile?.firstName,
+      lastName: result.user.profile?.lastName,
+      phone: result.user.profile?.phone,
+      birthDate: result.birthDate,
+      guardianName: result.guardianName,
+      guardianPhone: result.guardianPhone,
+      status: result.status,
+      joinedAt: result.joinedAt,
+    };
   }
+
+  // ============================================================
+  // FIND ALL
+  // ============================================================
 
   findAll(gymId: string) {
-    return this.prisma.member.findMany({ where: { gymId }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.member.findMany({
+      where: { gymId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: {
+          include: {
+            profile: true,
+          },
+        },
+        memberships: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    });
   }
+
+  // ============================================================
+  // FIND ONE
+  // ============================================================
 
   async findOne(gymId: string, id: string) {
-    const member = await this.prisma.member.findFirst({ where: { id, gymId } });
-    if (!member) throw new NotFoundException('Member not found');
+    const member = await this.prisma.member.findFirst({
+      where: {
+        id,
+        gymId,
+      },
+      include: {
+        user: {
+          include: {
+            profile: true,
+          },
+        },
+        memberships: {
+          include: {
+            plan: true,
+          },
+        },
+      },
+    });
+
+    if (!member) {
+      throw new NotFoundException("Member not found");
+    }
+
     return member;
   }
+  // ============================================================
+  // UPDATE
+  // ============================================================
 
   async update(gymId: string, id: string, dto: UpdateMemberDto) {
-    await this.findOne(gymId, id);
-    return this.prisma.member.update({
-      where: { id },
-      data: { ...dto, birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined },
+    const member = await this.findOne(gymId, id);
+
+    const {
+      firstName,
+      lastName,
+      phone,
+      email,
+      birthDate,
+      guardianName,
+      guardianPhone,
+      status,
+    } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      // ----------------------------------------------------------
+      // Update User
+      // ----------------------------------------------------------
+
+      if (email) {
+        await tx.user.update({
+          where: {
+            id: member.userId,
+          },
+          data: {
+            email,
+          },
+        });
+      }
+
+      // ----------------------------------------------------------
+      // Update Profile
+      // ----------------------------------------------------------
+
+      if (
+        firstName !== undefined ||
+        lastName !== undefined ||
+        phone !== undefined
+      ) {
+        await tx.profile.update({
+          where: {
+            userId: member.userId,
+          },
+          data: {
+            firstName,
+            lastName,
+            phone,
+          },
+        });
+      }
+
+      // ----------------------------------------------------------
+      // Update Member
+      // ----------------------------------------------------------
+
+      return tx.member.update({
+        where: {
+          id,
+        },
+
+        data: {
+          birthDate: birthDate ? new Date(birthDate) : undefined,
+
+          guardianName,
+          guardianPhone,
+          status,
+        },
+
+        include: {
+          user: {
+            include: {
+              profile: true,
+            },
+          },
+        },
+      });
     });
   }
+
+  // ============================================================
+  // DELETE
+  // ============================================================
 
   async remove(gymId: string, id: string) {
-    await this.findOne(gymId, id);
-    return this.prisma.member.delete({ where: { id } });
+    const member = await this.findOne(gymId, id);
+
+    // Member -> User -> Profile
+    //
+    // Because Member.user and User.profile use
+    // onDelete: Cascade, deleting User will also delete Profile.
+    //
+    // But Member itself references User, so deleting Member
+    // first is the safest approach.
+
+    return this.prisma.member.delete({
+      where: {
+        id: member.id,
+      },
+    });
   }
 
-  // Minimal data for an ID card (name, id, gym, active membership).
+  // ============================================================
+  // CARD DATA
+  // ============================================================
+
+  // Minimal data for an ID card:
+  // name, id, gym, active membership.
+
   async cardData(gymId: string, id: string) {
     const member = await this.findOne(gymId, id);
+
     const membership = await this.prisma.membership.findFirst({
-      where: { gymId, memberId: id, status: 'active' },
-      orderBy: { endDate: 'desc' },
-      include: { plan: { select: { name: true } } },
+      where: {
+        gymId,
+        memberId: id,
+        status: "active",
+      },
+
+      orderBy: {
+        endDate: "desc",
+      },
+
+      include: {
+        plan: {
+          select: {
+            name: true,
+          },
+        },
+      },
     });
-    return { id: member.id, fullName: member.fullName, joinedAt: member.joinedAt, membership };
+
+    const firstName = member.user.profile?.firstName ?? "";
+    const lastName = member.user.profile?.lastName ?? "";
+
+    const fullName = `${firstName} ${lastName}`.trim();
+
+    return {
+      id: member.id,
+      fullName,
+      joinedAt: member.joinedAt,
+      membership,
+    };
   }
 }

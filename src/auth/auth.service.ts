@@ -2,10 +2,11 @@ import {
   Injectable,
   BadRequestException,
   UnauthorizedException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { PrismaService } from '../prisma/prisma.service';
+} from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import * as bcrypt from "bcrypt";
+import { PrismaService } from "../prisma/prisma.service";
+import { Role } from "@prisma/client";
 
 @Injectable()
 export class AuthService {
@@ -14,34 +15,36 @@ export class AuthService {
     private readonly jwtService: JwtService,
   ) {}
 
+  // =====================================================================
+  // LOGIN
+  // =====================================================================
+
   async login(email: string, password: string) {
-    const profile = await this.prisma.profile.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         email,
       },
       include: {
         gym: true,
+        profile: true,
       },
     });
 
-    if (!profile) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (!user) {
+      throw new UnauthorizedException("Invalid credentials");
     }
 
-    const passwordValid = await bcrypt.compare(
-      password,
-      profile.passwordHash,
-    );
+    const passwordValid = await bcrypt.compare(password, user.passwordHash);
 
     if (!passwordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
 
     const payload = {
-      sub: profile.id,
-      email: profile.email,
-      gymId: profile.gymId,
-      role: profile.role,
+      sub: user.id,
+      email: user.email,
+      gymId: user.gymId,
+      role: user.role,
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
@@ -49,15 +52,23 @@ export class AuthService {
     return {
       accessToken,
       user: {
-        id: profile.id,
-        email: profile.email,
-        fullName: profile.fullName,
-        role: profile.role,
-        gymId: profile.gymId,
-        gym: profile.gym,
+        id: user.id,
+        email: user.email,
+        firstName: user.profile?.firstName,
+        lastName: user.profile?.lastName,
+        fullName: user.profile
+          ? `${user.profile.firstName} ${user.profile.lastName}`
+          : undefined,
+        role: user.role,
+        gymId: user.gymId,
+        gym: user.gym,
       },
     };
   }
+
+  // =====================================================================
+  // REGISTER GYM
+  // =====================================================================
 
   async registerGym(input: {
     gymName: string;
@@ -65,19 +76,20 @@ export class AuthService {
     ownerPassword: string;
     ownerName: string;
   }) {
-    const existingUser = await this.prisma.profile.findFirst({
+    const existingUser = await this.prisma.user.findFirst({
       where: {
         email: input.ownerEmail,
       },
     });
 
     if (existingUser) {
-      throw new BadRequestException(
-        'That email already has an account',
-      );
+      throw new BadRequestException("That email already has an account");
     }
 
     const passwordHash = await bcrypt.hash(input.ownerPassword, 12);
+
+    const [firstName, ...lastNameParts] = input.ownerName.trim().split(/\s+/);
+    const lastName = lastNameParts.join(" ");
 
     const result = await this.prisma.$transaction(async (tx) => {
       const gym = await tx.gym.create({
@@ -86,24 +98,63 @@ export class AuthService {
         },
       });
 
-      const profile = await tx.profile.create({
+      const user = await tx.user.create({
         data: {
           email: input.ownerEmail,
           passwordHash,
           gymId: gym.id,
-          fullName: input.ownerName,
-          role: 'OWNER',
+          role: "OWNER",
+          profile: {
+            create: {
+              firstName,
+              lastName: lastName || firstName,
+              gymId: gym.id,
+            },
+          },
+        },
+        include: {
+          profile: true,
         },
       });
 
       return {
         gym,
-        profile,
+        user,
       };
     });
 
     return {
       gymId: result.gym.id,
+      userId: result.user.id,
+    };
+  }
+
+  // =====================================================================
+  // HELPERS
+  // =====================================================================
+
+  private splitFullName(fullName: string) {
+    const normalizedName = fullName.trim().replace(/\s+/g, " ");
+
+    if (!normalizedName) {
+      return {
+        firstName: "",
+        lastName: "",
+      };
+    }
+
+    const parts = normalizedName.split(" ");
+
+    if (parts.length === 1) {
+      return {
+        firstName: parts[0],
+        lastName: "",
+      };
+    }
+
+    return {
+      firstName: parts[0],
+      lastName: parts.slice(1).join(" "),
     };
   }
 }
