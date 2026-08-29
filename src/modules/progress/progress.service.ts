@@ -1,0 +1,19 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+
+// Generic multi-tenant CRUD. For DTOs + business rules see `members`.
+@Injectable()
+export class ProgressService {
+  constructor(private readonly prisma: PrismaService) {}
+  private get model() { return (this.prisma as any).measurement; }
+
+  create(gymId: string, data: any) { return this.model.create({ data: { ...data, gymId } }); }
+  findAll(gymId: string) { return this.model.findMany({ where: { gymId }, orderBy: { createdAt: 'desc' } }); }
+  async findOne(gymId: string, id: string) {
+    const row = await this.model.findFirst({ where: { id, gymId } });
+    if (!row) throw new NotFoundException('Not found');
+    return row;
+  }
+  async update(gymId: string, id: string, data: any) { await this.findOne(gymId, id); return this.model.update({ where: { id }, data }); }
+  async remove(gymId: string, id: string) { await this.findOne(gymId, id); return this.model.delete({ where: { id } }); }
+}

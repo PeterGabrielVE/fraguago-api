@@ -1,0 +1,43 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fraguago-api
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fraguago-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fraguago-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fraguago
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fraguago"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fraguago-network
+
+volumes:
+  postgres_data:
+
+networks:
+  fraguago-network:
+    driver: bridge

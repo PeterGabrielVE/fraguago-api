@@ -1,0 +1,19 @@
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { SalesService } from './sales.service';
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { RolesGuard } from '../../common/roles.guard';
+import { GymId } from '../../auth/decorators/gym-id.decorator';
+
+@Controller('sales')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class SalesController {
+  constructor(private readonly service: SalesService) {}
+
+  @Post()
+  create(@GymId() gymId: string, @Body() dto: { productId: string; quantity?: number; memberId?: string }) {
+    return this.service.create(gymId, dto);
+  }
+
+  @Get()
+  findAll(@GymId() gymId: string) { return this.service.findAll(gymId); }
+}
