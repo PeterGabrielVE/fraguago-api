@@ -6,7 +6,7 @@ export class AttendanceService {
   constructor(private readonly prisma: PrismaService) {}
 
   checkIn(gymId: string, memberId: string) {
-    return this.prisma.attendance.create({ data: { gymId, memberId } });
+    return this.prisma.attendance.create({ data: { gymId, memberId, shift: "MORNING", } });
   }
 
   // Today's check-ins for the gym.

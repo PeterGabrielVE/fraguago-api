@@ -3,7 +3,9 @@ import {
   IsOptional,
   IsString,
   IsDateString,
+  IsEnum,
 } from 'class-validator';
+import { MemberStatus } from "@prisma/client";
 export class UpdateMemberDto {
   @IsOptional()
   @IsString()
@@ -27,13 +29,9 @@ export class UpdateMemberDto {
 
   @IsOptional()
   @IsString()
-  guardianName?: string;
-
-  @IsOptional()
-  @IsString()
   guardianPhone?: string;
 
   @IsOptional()
-  @IsString()
-  status?: string;
+  @IsEnum(MemberStatus)
+  status?: MemberStatus;
 }

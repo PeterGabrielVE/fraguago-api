@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MemberStatus } from "@prisma/client";
 
 @Injectable()
 export class ReportsService {
@@ -13,8 +14,8 @@ export class ReportsService {
     const now = new Date();
 
     const [members, activeMemberships, attendanceToday, monthTx] = await Promise.all([
-      this.prisma.member.count({ where: { gymId, status: 'active' } }),
-      this.prisma.membership.count({ where: { gymId, status: 'active', endDate: { gte: now } } }),
+      this.prisma.member.count({ where: { gymId, status: MemberStatus.ACTIVE } }),
+      this.prisma.membership.count({ where: { gymId, status: MemberStatus.ACTIVE, endDate: { gte: now } } }),
       this.prisma.attendance.count({ where: { gymId, checkedInAt: { gte: startOfDay } } }),
       this.prisma.transaction.groupBy({
         by: ['type'],

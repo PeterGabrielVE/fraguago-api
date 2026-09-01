@@ -1,10 +1,17 @@
 import {
+  IsDateString,
   IsEmail,
+  IsEnum,
   IsOptional,
   IsString,
-  IsDateString,
   MinLength,
-} from 'class-validator';
+} from "class-validator";
+
+import {
+  ActivityLevel,
+  TrainingGoal,
+  TrainingShift,
+} from "@prisma/client";
 
 export class CreateMemberDto {
   // ============================================================
@@ -32,15 +39,26 @@ export class CreateMemberDto {
   // MEMBER
   // ============================================================
 
+  @IsString()
+  identificationNumber!: string;
+
   @IsOptional()
   @IsDateString()
   birthDate?: string;
 
   @IsOptional()
-  @IsString()
-  guardianName?: string;
+  @IsEnum(ActivityLevel)
+  activityLevel?: ActivityLevel;
+
+  @IsOptional()
+  @IsEnum(TrainingShift)
+  preferredShift?: TrainingShift;
+
+  @IsOptional()
+  @IsEnum(TrainingGoal)
+  primaryGoal?: TrainingGoal;
 
   @IsOptional()
   @IsString()
-  guardianPhone?: string;
+  goalDescription?: string;
 }

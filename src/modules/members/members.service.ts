@@ -57,14 +57,6 @@ export class MembersService {
   // ============================================================
 
   async create(gymId: string, dto: CreateMemberDto) {
-    if (dto.birthDate && ageFrom(dto.birthDate) < 18) {
-      if (!dto.guardianName || !dto.guardianPhone) {
-        throw new BadRequestException(
-          "Member is a minor: guardian info is required.",
-        );
-      }
-    }
-
     const existingUser = await this.prisma.user.findFirst({
       where: {
         gymId,
@@ -102,10 +94,17 @@ export class MembersService {
         data: {
           gymId,
           userId: user.id,
+
+          identificationNumber: dto.identificationNumber,
+
           birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
-          guardianName: dto.guardianName,
-          guardianPhone: dto.guardianPhone,
+
+          activityLevel: dto.activityLevel,
+          preferredShift: dto.preferredShift,
+          primaryGoal: dto.primaryGoal,
+          goalDescription: dto.goalDescription,
         },
+
         include: {
           user: {
             include: {
@@ -126,8 +125,6 @@ export class MembersService {
       lastName: result.user.profile?.lastName,
       phone: result.user.profile?.phone,
       birthDate: result.birthDate,
-      guardianName: result.guardianName,
-      guardianPhone: result.guardianPhone,
       status: result.status,
       joinedAt: result.joinedAt,
     };
@@ -199,8 +196,6 @@ export class MembersService {
       phone,
       email,
       birthDate,
-      guardianName,
-      guardianPhone,
       status,
     } = dto;
 
@@ -252,9 +247,6 @@ export class MembersService {
 
         data: {
           birthDate: birthDate ? new Date(birthDate) : undefined,
-
-          guardianName,
-          guardianPhone,
           status,
         },
 

@@ -1,20 +1,27 @@
 // =====================================================================
 // Prisma schema — FraguaGo (multi-tenant gym SaaS)
 // =====================================================================
+//
 // Golden rule:
 // Every business table has gymId.
 // Tenant isolation is enforced by NestJS.
 // Every query must be scoped by gymId.
 //
 // Architecture:
-//   User    -> Authentication + authorization
-//   Profile -> Personal information
-//   Member  -> Gym customer / client
-//   Trainer -> Trainer-specific information
+//   User              -> Authentication + authorization
+//   Profile           -> Personal information
+//   Member            -> Gym customer / client
+//   EmergencyContact  -> Emergency contact information
+//   MedicalProfile    -> Medical and physical condition
+//   Trainer           -> Trainer-specific information
+//   MembershipPlan    -> Membership plan definition
+//   Membership        -> Member's active/historical membership
+//   Attendance        -> Daily gym access / attendance
+//   Transaction       -> Financial transactions
 // =====================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -45,8 +52,53 @@ enum TransactionType {
   EXPENSE
 }
 
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ActivityLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum TrainingShift {
+  MORNING
+  AFTERNOON
+  NIGHT
+}
+
+enum TrainingGoal {
+  MUSCLE_GAIN
+  WEIGHT_LOSS
+  GENERAL_WELLNESS
+  PERFORMANCE_REHABILITATION
+}
+
+enum MembershipType {
+  DAILY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  OTHER
+}
+
+enum AttendanceShift {
+  MORNING
+  AFTERNOON
+  NIGHT
+}
+
 // =====================================================================
-// TENANT
+// TENANT / GYM
 // =====================================================================
 
 model Gym {
@@ -54,22 +106,32 @@ model Gym {
   name      String
   createdAt DateTime @default(now())
 
-  users        User[]
-  profiles     Profile[]
-  members      Member[]
-  plans        MembershipPlan[]
-  memberships  Membership[]
-  routines     Routine[]
-  trainers     Trainer[]
+  users    User[]
+  profiles Profile[]
+  members  Member[]
+
+  plans       MembershipPlan[]
+  memberships Membership[]
+
+  routines Routine[]
+  trainers Trainer[]
+
   concepts     Concept[]
   transactions Transaction[]
-  services     Service[]
-  schedules    Schedule[]
-  auditLogs    AuditLog[]
-  attendances  Attendance[]
-  products     Product[]
-  sales        Sale[]
+
+  services  Service[]
+  schedules Schedule[]
+
+  auditLogs   AuditLog[]
+  attendances Attendance[]
+
+  products Product[]
+  sales    Sale[]
+
   measurements Measurement[]
+
+  emergencyContacts EmergencyContact[]
+  medicalProfiles   MedicalProfile[]
 
   @@index([name])
 }
@@ -77,33 +139,35 @@ model Gym {
 // =====================================================================
 // USERS
 // =====================================================================
+//
 // Represents an account that can authenticate into FraguaGo.
 //
-// Examples:
-//   OWNER   -> Gym owner
-//   ADMIN   -> Administrator
-//   TRAINER -> Trainer with system access
-//   STAFF   -> Reception/staff
-//   MEMBER  -> Gym customer with portal/app access
+// OWNER   -> Gym owner
+// ADMIN   -> Administrator
+// TRAINER -> Trainer with system access
+// STAFF   -> Reception/staff
+// MEMBER  -> Gym customer with portal/app access
+//
+// Email is unique inside a gym, not globally.
 // =====================================================================
 
 model User {
-  id           String   @id @default(uuid())
-  gymId        String
-  email        String   @unique
+  id    String @id @default(uuid())
+  gymId String
+
+  email        String
   passwordHash String
   role         Role
 
-  gym          Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  profile      Profile?
-  member       Member?
-  trainer      Trainer?
-  auditLogs    AuditLog[]
+  gym       Gym        @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  profile   Profile?
+  member    Member?
+  trainer   Trainer?
+  auditLogs AuditLog[]
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // Email is unique inside a gym, not globally.
   @@unique([gymId, email])
   @@index([gymId])
 }
@@ -111,25 +175,32 @@ model User {
 // =====================================================================
 // PROFILE
 // =====================================================================
+//
 // Personal information belonging to a User.
 //
 // Authentication data stays in User.
 // Personal data stays here.
+//
+// Fields based on the registration form:
+// - First name
+// - Last name
+// - Phone
+// - Address
 // =====================================================================
 
 model Profile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
+  id     String @id @default(uuid())
+  userId String @unique
+  gymId  String
 
   firstName String
   lastName  String
   phone     String?
+  address   String?
   avatarUrl String?
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-
-  gymId     String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -140,79 +211,190 @@ model Profile {
 // =====================================================================
 // MEMBERS
 // =====================================================================
+//
 // Gym customers.
 //
 // A Member has a User account because members can log in to:
-//   - View membership
-//   - View routines
-//   - View attendance
-//   - View measurements
-//   - View progress
+// - View membership
+// - View routines
+// - View attendance
+// - View measurements
+// - View progress
 //
-// userId is unique because one User can represent only one Member.
+// Personal information is stored in Profile.
+// Member stores gym/customer-specific information.
 // =====================================================================
 
 model Member {
-  id            String   @id @default(uuid())
-  gymId         String
-  userId        String   @unique
+  id     String @id @default(uuid())
+  gymId  String
+  userId String @unique
 
-  birthDate     DateTime?
-  guardianName  String?
-  guardianPhone String?
-  status        String   @default("active")
-  joinedAt      DateTime @default(now())
-  createdAt     DateTime @default(now())
+  identificationNumber String
+  birthDate            DateTime?
 
-  gym           Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activityLevel   ActivityLevel?
+  preferredShift  TrainingShift?
+  primaryGoal     TrainingGoal?
+  goalDescription String?
 
-  memberships   Membership[]
-  routines      Routine[]
-  transactions  Transaction[]
-  attendances   Attendance[]
-  sales         Sale[]
-  measurements  Measurement[]
+  status MemberStatus @default(ACTIVE)
 
+  joinedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  emergencyContact EmergencyContact?
+  medicalProfile   MedicalProfile?
+
+  memberships  Membership[]
+  routines     Routine[]
+  transactions Transaction[]
+  attendances  Attendance[]
+  sales        Sale[]
+  measurements Measurement[]
+
+  @@unique([gymId, identificationNumber])
   @@index([gymId])
   @@index([userId])
 }
 
 // =====================================================================
+// EMERGENCY CONTACT
+// =====================================================================
+//
+// Based on registration form:
+// - Contact name
+// - Phone
+// - Relationship
+// =====================================================================
+
+model EmergencyContact {
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String @unique
+
+  name         String
+  phone        String
+  relationship String
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gymId])
+  @@index([memberId])
+}
+
+// =====================================================================
+// MEDICAL PROFILE
+// =====================================================================
+//
+// Based on the registration form.
+//
+// Health conditions:
+// - Hypertension
+// - Diabetes
+// - Heart problems
+// - Asthma
+// - Other conditions
+//
+// Physical limitations:
+// - Injury
+// - Injury description
+//
+// Continuous medication:
+// - Takes medication
+// - Medication description
+// =====================================================================
+
+model MedicalProfile {
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String @unique
+
+  hypertension  Boolean @default(false)
+  diabetes      Boolean @default(false)
+  heartProblems Boolean @default(false)
+  asthma        Boolean @default(false)
+
+  otherConditions String?
+
+  hasInjury         Boolean @default(false)
+  injuryDescription String?
+
+  takesMedication       Boolean @default(false)
+  medicationDescription String?
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([gymId])
+  @@index([memberId])
+}
+
+// =====================================================================
 // MEMBERSHIP PLANS
+// =====================================================================
+//
+// Defines the plans offered by a gym.
+//
+// Examples:
+// - Daily
+// - Monthly
+// - Quarterly
+// - Annual
 // =====================================================================
 
 model MembershipPlan {
-  id           String   @id @default(uuid())
-  gymId        String
-  name         String
-  price        Decimal  @db.Decimal(10, 2)
-  durationDays Int
-  createdAt    DateTime @default(now())
+  id    String @id @default(uuid())
+  gymId String
 
-  gym          Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  memberships  Membership[]
+  name         String
+  type         MembershipType
+  price        Decimal        @db.Decimal(10, 2)
+  durationDays Int
+
+  createdAt DateTime @default(now())
+
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberships Membership[]
 
   @@index([gymId])
+  @@index([gymId, type])
 }
 
 // =====================================================================
 // MEMBERSHIPS
 // =====================================================================
+//
+// Represents a membership purchased/assigned to a member.
+// =====================================================================
 
 model Membership {
-  id        String   @id @default(uuid())
-  gymId     String
-  memberId  String
-  planId    String
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
+  planId   String
+
   startDate DateTime @default(now())
   endDate   DateTime
   status    String   @default("active")
-  createdAt DateTime @default(now())
 
-  gym       Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  member    Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  plan      MembershipPlan @relation(fields: [planId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym    Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  plan   MembershipPlan @relation(fields: [planId], references: [id])
 
   @@index([gymId])
   @@index([memberId])
@@ -222,6 +404,7 @@ model Membership {
 // =====================================================================
 // TRAINERS
 // =====================================================================
+//
 // Trainer-specific business information.
 //
 // Authentication data is stored in User.
@@ -230,14 +413,16 @@ model Membership {
 // =====================================================================
 
 model Trainer {
-  id        String   @id @default(uuid())
-  gymId     String
-  userId    String   @unique
+  id     String @id @default(uuid())
+  gymId  String
+  userId String @unique
+
   specialty String?
+
   createdAt DateTime @default(now())
 
-  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   routines  Routine[]
   schedules Schedule[]
@@ -251,17 +436,19 @@ model Trainer {
 // =====================================================================
 
 model Routine {
-  id          String   @id @default(uuid())
-  gymId       String
-  memberId    String
-  trainerId   String?
+  id        String  @id @default(uuid())
+  gymId     String
+  memberId  String
+  trainerId String?
+
   name        String
   description String?
-  createdAt   DateTime @default(now())
 
-  gym         Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  trainer     Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member  Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  trainer Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([memberId])
@@ -271,15 +458,18 @@ model Routine {
 // =====================================================================
 // CONCEPTS
 // =====================================================================
+//
 // Financial categories.
 // =====================================================================
 
 model Concept {
-  id        String      @id @default(uuid())
-  gymId     String
-  name      String
-  kind      ConceptKind
-  createdAt DateTime    @default(now())
+  id    String @id @default(uuid())
+  gymId String
+
+  name String
+  kind ConceptKind
+
+  createdAt DateTime @default(now())
 
   gym          Gym           @relation(fields: [gymId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -290,25 +480,43 @@ model Concept {
 // =====================================================================
 // FINANCIAL TRANSACTIONS
 // =====================================================================
+//
+// Used for income and expenses.
+//
+// For membership payments, paymentMethod indicates:
+// - Cash
+// - Card
+// - Transfer
+// - Other
+//
+// createdById identifies the User who registered the transaction.
+// =====================================================================
 
 model Transaction {
-  id        String          @id @default(uuid())
-  gymId     String
+  id    String @id @default(uuid())
+  gymId String
+
   type      TransactionType
   conceptId String?
   memberId  String?
-  amount    Decimal         @db.Decimal(10, 2)
-  note      String?
-  date      DateTime        @default(now())
-  createdAt DateTime        @default(now())
 
-  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  concept   Concept?  @relation(fields: [conceptId], references: [id], onDelete: SetNull)
-  member    Member?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  amount        Decimal        @db.Decimal(10, 2)
+  paymentMethod PaymentMethod?
+  note          String?
+  date          DateTime       @default(now())
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+
+  gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  concept Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+  member  Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([gymId, type])
   @@index([memberId])
+  @@index([createdById])
 }
 
 // =====================================================================
@@ -316,12 +524,14 @@ model Transaction {
 // =====================================================================
 
 model Service {
-  id          String   @id @default(uuid())
-  gymId       String
+  id    String @id @default(uuid())
+  gymId String
+
   name        String
-  price       Decimal  @db.Decimal(10, 2)
+  price       Decimal @db.Decimal(10, 2)
   description String?
-  createdAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
 
   gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
 
@@ -333,18 +543,20 @@ model Service {
 // =====================================================================
 
 model Schedule {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   gymId     String
   trainerId String?
+
   title     String
-  weekday   Int      // 0 = Sunday ... 6 = Saturday
-  startTime String   // "18:00"
-  endTime   String   // "19:00"
+  weekday   Int
+  startTime String
+  endTime   String
   capacity  Int?
+
   createdAt DateTime @default(now())
 
-  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  trainer   Trainer?  @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+  gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  trainer Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([trainerId])
@@ -355,17 +567,19 @@ model Schedule {
 // =====================================================================
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  gymId     String
-  userId    String?
-  action    String
-  entity    String
-  entityId  String?
-  meta      Json?
+  id     String  @id @default(uuid())
+  gymId  String
+  userId String?
+
+  action   String
+  entity   String
+  entityId String?
+  meta     Json?
+
   createdAt DateTime @default(now())
 
-  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  gym  Gym   @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([userId])
@@ -375,15 +589,33 @@ model AuditLog {
 // =====================================================================
 // ATTENDANCE
 // =====================================================================
+//
+// Daily attendance / access control.
+//
+// Based on the registration/attendance sheet:
+// - Date
+// - Shift
+// - Entry time
+// - Member
+// - Pass type
+// - Signature
+//
+// Member name and identification number are obtained through Member,
+// Profile and User rather than duplicated here.
+// =====================================================================
 
 model Attendance {
-  id          String   @id @default(uuid())
-  gymId       String
-  memberId    String
-  checkedInAt DateTime @default(now())
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
 
-  gym         Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  checkedInAt DateTime        @default(now())
+  shift       AttendanceShift
+  passType    MembershipType?
+  signature   String?
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([gymId])
   @@index([memberId])
@@ -395,16 +627,18 @@ model Attendance {
 // =====================================================================
 
 model Product {
-  id        String   @id @default(uuid())
-  gymId     String
-  name      String
-  price     Decimal  @db.Decimal(10, 2)
-  stock     Int      @default(0)
-  sku       String?
+  id    String @id @default(uuid())
+  gymId String
+
+  name  String
+  price Decimal @db.Decimal(10, 2)
+  stock Int     @default(0)
+  sku   String?
+
   createdAt DateTime @default(now())
 
-  gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  sales     Sale[]
+  gym   Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  sales Sale[]
 
   @@index([gymId])
   @@index([gymId, sku])
@@ -415,19 +649,21 @@ model Product {
 // =====================================================================
 
 model Sale {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   gymId     String
   productId String
   memberId  String?
-  quantity  Int      @default(1)
-  unitPrice Decimal  @db.Decimal(10, 2)
-  total     Decimal  @db.Decimal(10, 2)
+
+  quantity  Int     @default(1)
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(10, 2)
+
   soldAt    DateTime @default(now())
   createdAt DateTime @default(now())
 
-  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  product   Product   @relation(fields: [productId], references: [id])
-  member    Member?   @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+  member  Member? @relation(fields: [memberId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([productId])
@@ -440,23 +676,25 @@ model Sale {
 // =====================================================================
 
 model Measurement {
-  id        String   @id @default(uuid())
-  gymId     String
-  memberId  String
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
 
-  weightKg  Decimal? @db.Decimal(5, 2)
-  heightCm  Decimal? @db.Decimal(5, 2)
-  bodyFat   Decimal? @db.Decimal(5, 2)
-  chestCm   Decimal? @db.Decimal(5, 2)
-  waistCm   Decimal? @db.Decimal(5, 2)
-  armCm     Decimal? @db.Decimal(5, 2)
+  weightKg Decimal? @db.Decimal(5, 2)
+  heightCm Decimal? @db.Decimal(5, 2)
+  bodyFat  Decimal? @db.Decimal(5, 2)
 
-  notes     String?
-  date      DateTime @default(now())
+  chestCm Decimal? @db.Decimal(5, 2)
+  waistCm Decimal? @db.Decimal(5, 2)
+  armCm   Decimal? @db.Decimal(5, 2)
+
+  notes String?
+  date  DateTime @default(now())
+
   createdAt DateTime @default(now())
 
-  gym       Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([gymId])
   @@index([memberId])
