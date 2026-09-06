@@ -24,6 +24,7 @@ import { ProgressModule } from './modules/progress/progress.module';
 import { MembershipsModule } from './modules/memberships/memberships.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
+import { HealthProfilesModule } from './modules/health-profiles/health-profiles.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
     MembershipsModule,
     ReportsModule,
     RemindersModule,
+    HealthProfilesModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }, // auto-audit all mutations
