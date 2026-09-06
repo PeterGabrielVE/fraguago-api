@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: fraguago-api
     restart: unless-stopped
+    command: yarn start:dev
 
     ports:
       - "3001:3001"

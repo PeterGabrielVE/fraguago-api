@@ -3,6 +3,7 @@ import { MembershipPlansService } from './membership-plans.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { GymId } from '../../auth/decorators/gym-id.decorator';
+import { CreateMembershipPlanDto } from './dto/create-membership-plan.dto';
 
 @Controller('membership-plans')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -10,7 +11,7 @@ export class MembershipPlansController {
   constructor(private readonly service: MembershipPlansService) {}
 
   @Post()
-  create(@GymId() gymId: string, @Body() dto: any) { return this.service.create(gymId, dto); }
+  create(@GymId() gymId: string, @Body() dto: CreateMembershipPlanDto) { return this.service.create(gymId, dto); }
 
   @Get()
   findAll(@GymId() gymId: string) { return this.service.findAll(gymId); }
