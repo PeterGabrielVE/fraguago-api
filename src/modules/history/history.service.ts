@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Inject, Injectable } from '@nestjs/common';
+import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 
 @Injectable()
 export class HistoryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // Full history of a member: their memberships and their payments,
   // all scoped by gymId so data never crosses between gyms.

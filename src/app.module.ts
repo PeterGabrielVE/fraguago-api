@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -25,6 +25,9 @@ import { MembershipsModule } from './modules/memberships/memberships.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { HealthProfilesModule } from './modules/health-profiles/health-profiles.module';
+import { TenantInterceptor } from './common/tenant/tenant.interceptor';
+import { RolesGuard } from './common/roles.guard';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -52,6 +55,9 @@ import { HealthProfilesModule } from './modules/health-profiles/health-profiles.
     HealthProfilesModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
+    { provide: APP_GUARD, useClass: RolesGuard },      // 2º: usa req.user
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor }, // auto-set tenant context
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }, // auto-audit all mutations
   ],
 })

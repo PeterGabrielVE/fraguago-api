@@ -1,12 +1,12 @@
 // src/health-profiles/health-profiles.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { UpsertMedicalProfileDto } from './dto/upsert-medical-profile.dto';
 
 
 @Injectable()
 export class HealthProfilesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   /**
    * Verifica que el socio pertenezca al gym antes de tocar nada.

@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Inject, Injectable } from '@nestjs/common';
 import { MemberStatus } from "@prisma/client";
+import { ScopedPrismaClient, TENANT_PRISMA } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // Dashboard: the key numbers a gym owner wants at a glance.
   async dashboard(gymId: string) {

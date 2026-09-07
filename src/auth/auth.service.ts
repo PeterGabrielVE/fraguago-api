@@ -5,13 +5,13 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcrypt";
-import { PrismaService } from "../prisma/prisma.service";
-import { Role } from "@prisma/client";
+import { AuthPrismaService } from "./auth-prisma.service";
+
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly prisma: AuthPrismaService,
     private readonly jwtService: JwtService,
   ) {}
 

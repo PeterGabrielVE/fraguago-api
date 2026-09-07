@@ -1,11 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
 import * as bcrypt from "bcrypt";
-import { PrismaService } from "../../prisma/prisma.service";
+import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
@@ -27,7 +28,7 @@ function ageFrom(iso: string): number {
 
 @Injectable()
 export class MembersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // ============================================================
   // CREATE MEMBER

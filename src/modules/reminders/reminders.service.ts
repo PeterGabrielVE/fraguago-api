@@ -1,12 +1,12 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { PrismaService } from "../../prisma/prisma.service";
+import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 
 @Injectable()
 export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // Builds a click-to-chat WhatsApp link with a pre-filled message. Free.
   private waLink(

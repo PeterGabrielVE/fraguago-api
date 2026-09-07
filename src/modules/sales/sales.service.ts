@@ -1,9 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 
 @Injectable()
 export class SalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // Records a sale, decrements product stock, and creates a matching
   // INCOME transaction — all atomically in one DB transaction.

@@ -1,9 +1,9 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaService } from "../../prisma/prisma.service";
+import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 
 @Injectable()
 export class MembershipsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   // Assign a plan to a member. endDate = start + plan.durationDays.
   async assign(

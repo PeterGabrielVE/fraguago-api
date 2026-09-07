@@ -1,12 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { TransactionType } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 
 @Injectable()
 export class FinancesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
 
   create(gymId: string, dto: CreateTransactionDto) {
     return this.prisma.transaction.create({
