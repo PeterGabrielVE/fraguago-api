@@ -17,6 +17,8 @@ import { UpdateMemberDto } from './dto/update-member.dto';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { GymId } from '../../auth/decorators/gym-id.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { Role } from '@prisma/client';
 
 @Controller('members')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -24,6 +26,7 @@ export class MembersController {
   constructor(private readonly service: MembersService) {}
 
   @Post()
+  @Roles(Role.ADMIN, Role.STAFF)  
   create(
     @GymId() gymId: string,
     @Body() dto: CreateMemberDto,
@@ -32,11 +35,13 @@ export class MembersController {
   }
 
   @Get()
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   findAll(@GymId() gymId: string) {
     return this.service.findAll(gymId);
   }
 
   @Get(':id')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   findOne(
     @GymId() gymId: string,
     @Param('id') id: string,
@@ -47,6 +52,7 @@ export class MembersController {
   // Data for a member ID card.
   // The actual PDF/print is done in the frontend.
   @Get(':id/card')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   card(
     @GymId() gymId: string,
     @Param('id') id: string,
@@ -55,6 +61,7 @@ export class MembersController {
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN, Role.STAFF)
   update(
     @GymId() gymId: string,
     @Param('id') id: string,
@@ -64,6 +71,7 @@ export class MembersController {
   }
 
   @Delete(':id')
+  @Roles(Role.ADMIN, Role.STAFF)
   remove(
     @GymId() gymId: string,
     @Param('id') id: string,
