@@ -28,6 +28,10 @@ export class RolesGuard implements CanActivate {
       throw new ForbiddenException('Usuario no autenticado');
     }
 
+    if (!user?.role) {
+      throw new ForbiddenException('No role found on user');
+    }
+
     if (user.role === Role.OWNER) return true;
 
     if (!requiredRoles.includes(user.role)) {
