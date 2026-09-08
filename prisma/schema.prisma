@@ -164,12 +164,49 @@ model User {
   member    Member?
   trainer   Trainer?
   auditLogs AuditLog[]
+  refreshTokens RefreshToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([gymId, email])
   @@index([gymId])
+}
+
+// =====================================================================
+// REFRESH TOKENS
+// =====================================================================
+//
+// Long-lived tokens used to obtain new access tokens without
+// forcing the user to log in again.
+//
+// Security notes:
+// - We NEVER store the raw token. Only its SHA-256 hash (tokenHash).
+// - Rotation: on every /auth/refresh the current token is revoked
+//   and a new one is issued.
+// - `revoked` lets us implement real logout and "logout everywhere".
+// - Reusing a revoked token is treated as theft (revoke all sessions).
+//
+// Not scoped by gymId on purpose: a refresh token is always resolved
+// through userId (which already carries the tenant). It is auth
+// infrastructure, not tenant business data, so it never takes part
+// in gym-scoped queries. See note below if you want strict consistency.
+// =====================================================================
+
+model RefreshToken {
+  id     String @id @default(uuid())
+  userId String
+
+  tokenHash String   // SHA-256 of the raw refresh token — never the plain token
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])   // el /auth/refresh busca por este hash
 }
 
 // =====================================================================
