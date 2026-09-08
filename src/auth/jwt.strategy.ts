@@ -5,10 +5,10 @@ import { ExtractJwt, Strategy } from "passport-jwt";
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
-    const jwtSecret = process.env.JWT_SECRET;
+    const jwtSecret = process.env.JWT_ACCESS_SECRET;
 
     if (!jwtSecret) {
-      throw new Error("JWT_SECRET is not defined");
+      throw new Error("JWT_ACCESS_SECRET is not defined");
     }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

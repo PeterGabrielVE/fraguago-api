@@ -8,6 +8,8 @@ export interface AuthenticatedUser {
 }
 
 export const CurrentUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): AuthenticatedUser =>
-    ctx.switchToHttp().getRequest().user,
+  (data: unknown, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    return request.user; // lo que devolvió JwtStrategy.validate()
+  },
 );
