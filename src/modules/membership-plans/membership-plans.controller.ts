@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { MembershipPlansService } from './membership-plans.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
@@ -7,6 +7,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { CreateMembershipPlanDto } from './dto/create-membership-plan.dto';
 import { UpdateMembershipPlanDto } from './dto/update-membership-plan.dto';
+import { SearchMembershipPlansDto } from './dto/search-membership-plans.dto';
 
 @Controller('membership-plans')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -21,8 +22,8 @@ export class MembershipPlansController {
 
   @Get()
   @Roles(Role.OWNER, Role.ADMIN, Role.STAFF, Role.TRAINER)
-  findAll(@GymId() gymId: string) {
-    return this.service.findAll(gymId);
+  findAll(@GymId() gymId: string, @Query() query: SearchMembershipPlansDto) {
+    return this.service.findAll(gymId, query);
   }
 
   @Get(':id')

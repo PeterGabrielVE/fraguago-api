@@ -267,14 +267,12 @@ export class AuthService {
   }) {
     const accessOptions: JwtSignOptions = {
       secret: process.env.JWT_ACCESS_SECRET,
-      expiresIn: (process.env.JWT_ACCESS_EXPIRES ??
-        "15m") as JwtSignOptions["expiresIn"],
+      expiresIn: Number(process.env.JWT_ACCESS_EXPIRES_SEC ?? 900), 
     };
 
     const refreshOptions: JwtSignOptions = {
       secret: process.env.JWT_REFRESH_SECRET,
-      expiresIn: (process.env.JWT_REFRESH_EXPIRES ??
-        "7d") as JwtSignOptions["expiresIn"],
+      expiresIn: Number(process.env.JWT_REFRESH_EXPIRES_SEC ?? 604800),
     };
 
     const accessToken = await this.jwtService.signAsync(payload, accessOptions);

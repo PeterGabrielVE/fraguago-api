@@ -16,6 +16,7 @@ import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dt
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 import { SearchMembersDto } from "./dto/search-members.dto";
+import { paginate } from "src/common/pagination";
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -174,31 +175,53 @@ export class MembersService {
         ? {
             AND: tokens.map((token) => ({
               OR: [
-                { identificationNumber: { contains: token, mode: "insensitive" as const } },
-                { user: { email: { contains: token, mode: "insensitive" as const } } },
-                { user: { profile: { firstName: { contains: token, mode: "insensitive" as const } } } },
-                { user: { profile: { lastName: { contains: token, mode: "insensitive" as const } } } },
+                {
+                  identificationNumber: {
+                    contains: token,
+                    mode: "insensitive" as const,
+                  },
+                },
+                {
+                  user: {
+                    email: { contains: token, mode: "insensitive" as const },
+                  },
+                },
+                {
+                  user: {
+                    profile: {
+                      firstName: {
+                        contains: token,
+                        mode: "insensitive" as const,
+                      },
+                    },
+                  },
+                },
+                {
+                  user: {
+                    profile: {
+                      lastName: {
+                        contains: token,
+                        mode: "insensitive" as const,
+                      },
+                    },
+                  },
+                },
               ],
             })),
           }
         : {}),
     };
 
-    const [total, data] = await this.prisma.$transaction([
-      this.prisma.member.count({ where }),
-      this.prisma.member.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          user: { include: { profile: true } },
-          memberships: { include: { plan: true } },
-        },
-      }),
-    ]);
-
-    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+    return paginate(this.prisma.member, {
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        user: { include: { profile: true } },
+        memberships: { include: { plan: true } },
+      },
+      page: query.page,
+      pageSize: query.pageSize,
+    });
   }
 
   // ============================================================
@@ -423,7 +446,6 @@ export class MembersService {
     return new EmergencyContactResponseDto(contact);
   }
 
-
   // ============================================================
   // MEDICAL PROFILE  (B10)
   // ============================================================
@@ -458,14 +480,14 @@ export class MembersService {
 
     const data = {
       ...dto,
-      injuryDescription: dto.hasInjury ? dto.injuryDescription ?? null : null,
+      injuryDescription: dto.hasInjury ? (dto.injuryDescription ?? null) : null,
       medicationDescription: dto.takesMedication
-        ? dto.medicationDescription ?? null
+        ? (dto.medicationDescription ?? null)
         : null,
     };
 
     return this.prisma.medicalProfile.upsert({
-      where: { memberId }, 
+      where: { memberId },
       create: { gymId, memberId, ...data },
       update: { ...data },
     });

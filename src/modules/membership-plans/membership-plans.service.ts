@@ -2,6 +2,8 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateMembershipPlanDto } from './dto/create-membership-plan.dto';
 import { UpdateMembershipPlanDto } from './dto/update-membership-plan.dto';
+import { SearchMembershipPlansDto } from './dto/search-membership-plans.dto';
+import { paginate } from 'src/common/pagination';
 
 @Injectable()
 export class MembershipPlansService {
@@ -12,9 +14,14 @@ export class MembershipPlansService {
     return this.model.create({ data: { ...data, gymId } });
   }
 
-  findAll(gymId: string) {
-    return this.model.findMany({ where: { gymId }, orderBy: { createdAt: 'desc' } });
-  }
+ findAll(gymId: string, query: SearchMembershipPlansDto) {
+  return paginate(this.model, {
+    where: { gymId },
+    orderBy: { createdAt: 'desc' },
+    page: query.page,
+    pageSize: query.pageSize,
+  });
+}
 
   async findOne(gymId: string, id: string) {
     const row = await this.model.findFirst({ where: { id, gymId } });
