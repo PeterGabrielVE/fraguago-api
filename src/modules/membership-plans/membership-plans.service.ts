@@ -1,14 +1,14 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
+import { CreateMembershipPlanDto } from './dto/create-membership-plan.dto';
+import { UpdateMembershipPlanDto } from './dto/update-membership-plan.dto';
 
-// Generic multi-tenant CRUD. To add class-validator DTOs and business
-// rules, follow the pattern in the `members` module.
 @Injectable()
 export class MembershipPlansService {
   constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
   private get model() { return (this.prisma as any).membershipPlan; }
 
-  create(gymId: string, data: any) {
+  create(gymId: string, data: CreateMembershipPlanDto) {
     return this.model.create({ data: { ...data, gymId } });
   }
 
@@ -22,8 +22,8 @@ export class MembershipPlansService {
     return row;
   }
 
-  async update(gymId: string, id: string, data: any) {
-    await this.findOne(gymId, id);          // ensure it belongs to THIS gym
+  async update(gymId: string, id: string, data: UpdateMembershipPlanDto) {
+    await this.findOne(gymId, id);
     return this.model.update({ where: { id }, data });
   }
 
