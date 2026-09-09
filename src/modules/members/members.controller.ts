@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from "@nestjs/common";
 
@@ -20,6 +21,8 @@ import { GymId } from "../../auth/decorators/gym-id.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { Role } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
+import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
+import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 
 @Controller("members")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -78,13 +81,38 @@ export class MembersController {
     return this.service.changeStatus(gymId, id, dto.status);
   }
 
-  @Get(':id/emergency-contact')
+  @Get(":id/emergency-contact")
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   getEmergencyContact(
-    @GymId() gymId: string,          
-    @Param('id') id: string,
+    @GymId() gymId: string,
+    @Param("id") id: string,
   ): Promise<EmergencyContactResponseDto> {
     return this.service.getEmergencyContact(gymId, id);
   }
 
-  
+  @Put(":id/emergency-contact")
+  @Roles(Role.ADMIN, Role.STAFF)
+  upsertEmergencyContact(
+    @GymId() gymId: string,
+    @Param("id") id: string,
+    @Body() dto: UpsertEmergencyContactDto,
+  ): Promise<EmergencyContactResponseDto> {
+    return this.service.upsertEmergencyContact(gymId, id, dto);
+  }
+
+  @Get(":id/medical-profile")
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  getMedicalProfile(@Param("id") id: string) {
+    return this.service.findByMember(id);
+  }
+
+  @Put(":id/medical-profile")
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  upsertMedicalProfile(
+    @GymId() gymId: string,
+    @Param("id") id: string,
+    @Body() dto: UpsertMedicalProfileDto,
+  ) {
+    return this.service.upsertMedicalProfile(gymId, id, dto);
+  }
 }

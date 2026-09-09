@@ -13,6 +13,8 @@ import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
 import { MemberStatus } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
+import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
+import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -343,7 +345,6 @@ export class MembersService {
     gymId: string,
     memberId: string,
   ): Promise<EmergencyContactResponseDto> {
-
     const contact = await this.prisma.emergencyContact.findFirst({
       where: { memberId, gymId },
     });
@@ -355,5 +356,86 @@ export class MembersService {
     }
 
     return new EmergencyContactResponseDto(contact);
+  }
+
+  async upsertEmergencyContact(
+    gymId: string,
+    memberId: string,
+    dto: UpsertEmergencyContactDto,
+  ): Promise<EmergencyContactResponseDto> {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId, gymId },
+      select: { id: true },
+    });
+
+    if (!member) {
+      throw new NotFoundException(`Member with id ${memberId} not found`);
+    }
+
+    const contact = await this.prisma.emergencyContact.upsert({
+      where: { memberId },
+      create: {
+        gymId,
+        memberId,
+        name: dto.name,
+        phone: dto.phone,
+        relationship: dto.relationship,
+      },
+      update: {
+        name: dto.name,
+        phone: dto.phone,
+        relationship: dto.relationship,
+      },
+    });
+
+    return new EmergencyContactResponseDto(contact);
+  }
+
+
+  // ============================================================
+  // MEDICAL PROFILE  (B10)
+  // ============================================================
+
+  async findByMember(memberId: string) {
+    // Read auto-scopeado por gymId. Verificamos que el socio exista
+    // (y por auto-scope, que sea de este gym) antes de devolver la ficha.
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new NotFoundException("Socio no encontrado en este gimnasio");
+    }
+
+    // null si aún no tiene ficha -> el formulario se muestra vacío.
+    return this.prisma.medicalProfile.findFirst({ where: { memberId } });
+  }
+
+  async upsertMedicalProfile(
+    gymId: string,
+    memberId: string,
+    dto: UpsertMedicalProfileDto,
+  ) {
+    const member = await this.prisma.member.findFirst({
+      where: { id: memberId },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new NotFoundException("Socio no encontrado en este gimnasio");
+    }
+
+    const data = {
+      ...dto,
+      injuryDescription: dto.hasInjury ? dto.injuryDescription ?? null : null,
+      medicationDescription: dto.takesMedication
+        ? dto.medicationDescription ?? null
+        : null,
+    };
+
+    return this.prisma.medicalProfile.upsert({
+      where: { memberId }, 
+      create: { gymId, memberId, ...data },
+      update: { ...data },
+    });
   }
 }
