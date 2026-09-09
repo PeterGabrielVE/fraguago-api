@@ -4,31 +4,40 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService, JwtSignOptions } from "@nestjs/jwt";
-import * as bcrypt from "bcrypt";
-import { AuthPrismaService } from "./auth-prisma.service";
 import { createHash, randomBytes } from "crypto";
+import { AuthPrismaService } from "./auth-prisma.service";
+import { PasswordService } from "./password.service";
 
 @Injectable()
 export class AuthService {
+  // Hash bcrypt real para igualar el tiempo de cómputo cuando el email
+  // no existe (evita enumeración de usuarios por timing). Reemplázalo por
+  // uno generado en tu entorno (ver nota abajo).
+  private readonly DUMMY_HASH = "$2b$12$Qj/b6I7d6tI7S7juF0qcjOv76BMt3vgDyd8Zn6peXnjMvOA5QWota";
+
   constructor(
     private readonly prisma: AuthPrismaService,
     private readonly jwtService: JwtService,
+    private readonly passwords: PasswordService,
   ) {}
 
   // =====================================================================
   // LOGIN
   // =====================================================================
-
-    async login(email: string, password: string) {
+  async login(email: string, password: string) {
     const user = await this.prisma.user.findFirst({
       where: { email },
       include: { gym: true, profile: true },
     });
 
-    if (!user) throw new UnauthorizedException("Invalid credentials");
+    // Comparamos SIEMPRE (contra el dummy si no hay user) para que el tiempo
+    // de respuesta no revele si el email existe.
+    const hashToCompare = user?.passwordHash ?? this.DUMMY_HASH;
+    const passwordValid = await this.passwords.verify(password, hashToCompare);
 
-    const passwordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordValid) throw new UnauthorizedException("Invalid credentials");
+    if (!user || !passwordValid) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
     const tokens = await this.issueTokens({
       sub: user.id,
@@ -38,7 +47,7 @@ export class AuthService {
     });
 
     return {
-      ...tokens, 
+      ...tokens,
       user: {
         id: user.id,
         email: user.email,
@@ -55,14 +64,13 @@ export class AuthService {
   }
 
   // =====================================================================
-  // REFRESH  ← el nuevo endpoint
+  // REFRESH
   // =====================================================================
   async refresh(refreshToken?: string) {
-
     if (!refreshToken) {
       throw new UnauthorizedException("Missing refresh token");
     }
-    // 1) Verificar firma y expiración del JWT
+
     let payload: { sub: string };
     try {
       payload = await this.jwtService.verifyAsync(refreshToken, {
@@ -72,40 +80,37 @@ export class AuthService {
       throw new UnauthorizedException("Invalid refresh token");
     }
 
-    // 2) Buscar el token guardado (por su hash) y que no esté revocado
+    // Buscamos SIN filtrar por revoked, para poder detectar reuso.
     const tokenHash = this.hashToken(refreshToken);
     const stored = await this.prisma.refreshToken.findFirst({
-      where: { userId: payload.sub, tokenHash, revoked: false },
+      where: { userId: payload.sub, tokenHash },
     });
 
-    if (!stored || stored.expiresAt < new Date()) {
+    if (!stored) {
       throw new UnauthorizedException("Invalid refresh token");
     }
 
+    // Token ya revocado que se reusa → posible robo: quemamos todo.
     if (stored.revoked) {
-      // token ya usado antes → posible robo
       await this.logoutAll(payload.sub);
       throw new UnauthorizedException("Refresh token reuse detected");
     }
-
 
     if (stored.expiresAt < new Date()) {
       throw new UnauthorizedException("Refresh token expired");
     }
 
-    // 3) Rotación: revocamos el actual antes de emitir uno nuevo
+    // Rotación: revocamos el actual antes de emitir el nuevo.
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { revoked: true },
     });
 
-    // 4) Traer datos frescos del usuario (rol/gym pueden haber cambiado)
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
     if (!user) throw new UnauthorizedException("Invalid refresh token");
 
-    // 5) Emitir par de tokens nuevo
     return this.issueTokens({
       sub: user.id,
       email: user.email,
@@ -115,9 +120,10 @@ export class AuthService {
   }
 
   // =====================================================================
-  // LOGOUT  (revoca el refresh token)
+  // LOGOUT (revoca un refresh token)
   // =====================================================================
-  async logout(refreshToken: string) {
+  async logout(refreshToken?: string) {
+    if (!refreshToken) return { success: true };
     const tokenHash = this.hashToken(refreshToken);
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revoked: false },
@@ -127,9 +133,19 @@ export class AuthService {
   }
 
   // =====================================================================
+  // LOGOUT ALL (revoca TODOS los refresh tokens del usuario)
+  // =====================================================================
+  async logoutAll(userId: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
+    });
+    return { success: true };
+  }
+
+  // =====================================================================
   // REGISTER GYM
   // =====================================================================
-
   async registerGym(input: {
     gymName: string;
     ownerEmail: string;
@@ -137,27 +153,20 @@ export class AuthService {
     ownerName: string;
   }) {
     const existingUser = await this.prisma.user.findFirst({
-      where: {
-        email: input.ownerEmail,
-      },
+      where: { email: input.ownerEmail },
     });
-
     if (existingUser) {
       throw new BadRequestException("That email already has an account");
     }
 
-    const passwordHash = await bcrypt.hash(input.ownerPassword, 12);
+    // Ahora vía PasswordService (valida el límite de 72 bytes de bcrypt).
+    const passwordHash = await this.passwords.hash(input.ownerPassword);
 
     const [firstName, ...lastNameParts] = input.ownerName.trim().split(/\s+/);
     const lastName = lastNameParts.join(" ");
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const gym = await tx.gym.create({
-        data: {
-          name: input.gymName,
-        },
-      });
-
+      const gym = await tx.gym.create({ data: { name: input.gymName } });
       const user = await tx.user.create({
         data: {
           email: input.ownerEmail,
@@ -172,27 +181,17 @@ export class AuthService {
             },
           },
         },
-        include: {
-          profile: true,
-        },
+        include: { profile: true },
       });
-
-      return {
-        gym,
-        user,
-      };
+      return { gym, user };
     });
 
-    return {
-      gymId: result.gym.id,
-      userId: result.user.id,
-    };
+    return { gymId: result.gym.id, userId: result.user.id };
   }
 
   // =====================================================================
   // HELPERS
   // =====================================================================
-
   private hashToken(token: string): string {
     return createHash("sha256").update(token).digest("hex");
   }
@@ -205,12 +204,14 @@ export class AuthService {
   }) {
     const accessOptions: JwtSignOptions = {
       secret: process.env.JWT_ACCESS_SECRET,
-      expiresIn: (process.env.JWT_ACCESS_EXPIRES ?? "15m") as JwtSignOptions["expiresIn"],
+      expiresIn: (process.env.JWT_ACCESS_EXPIRES ??
+        "15m") as JwtSignOptions["expiresIn"],
     };
 
     const refreshOptions: JwtSignOptions = {
       secret: process.env.JWT_REFRESH_SECRET,
-      expiresIn: (process.env.JWT_REFRESH_EXPIRES ?? "7d") as JwtSignOptions["expiresIn"],
+      expiresIn: (process.env.JWT_REFRESH_EXPIRES ??
+        "7d") as JwtSignOptions["expiresIn"],
     };
 
     const accessToken = await this.jwtService.signAsync(payload, accessOptions);
@@ -231,16 +232,5 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken };
-  }
-
-   // =====================================================================
-  // LOGOUT ALL (revoca TODOS los refresh tokens del usuario)
-  // =====================================================================
-  async logoutAll(userId: string) {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revoked: false },
-      data: { revoked: true },
-    });
-    return { success: true };
   }
 }
