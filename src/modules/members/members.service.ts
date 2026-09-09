@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -10,6 +11,7 @@ import { PasswordService } from "../../auth/password.service";
 
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
+import { MemberStatus } from "@prisma/client";
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -287,6 +289,54 @@ export class MembersService {
       fullName,
       joinedAt: member.joinedAt,
       membership,
+    };
+  }
+
+
+  private readonly ALLOWED_TRANSITIONS: Record<MemberStatus, MemberStatus[]> = {
+    ACTIVE: [MemberStatus.SUSPENDED, MemberStatus.INACTIVE],
+    SUSPENDED: [MemberStatus.ACTIVE, MemberStatus.INACTIVE],
+    INACTIVE: [MemberStatus.ACTIVE],
+  };
+
+  async changeStatus(gymId: string, id: string, newStatus: MemberStatus) {
+    // 1. Existe y pertenece a este gym (aislamiento tenant)
+    const member = await this.findOne(gymId, id);
+
+    // 2. No-op: ya está en ese estado
+    if (member.status === newStatus) {
+      throw new BadRequestException(`El miembro ya está ${newStatus}.`);
+    }
+
+    // 3. ¿Es una transición permitida?
+    const allowed = this.ALLOWED_TRANSITIONS[member.status] ?? [];
+    if (!allowed.includes(newStatus)) {
+      throw new BadRequestException(
+        `Transición no permitida: ${member.status} → ${newStatus}.`,
+      );
+    }
+
+    // 4. Aplicar el cambio
+    const updated = await this.prisma.member.update({
+      where: { id },
+      data: { status: newStatus },
+      include: {
+        user: { include: { profile: true } },
+      },
+    });
+
+    // 5. (Opcional) efectos secundarios según el nuevo estado.
+    //    Ej: al suspender, podrías congelar membresías activas.
+    //    Lo dejo marcado como punto de extensión, sin implementar,
+    //    para que decidas la regla de negocio.
+    // if (newStatus === MemberStatus.SUSPENDED) { ... }
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      fullName: updated.user.profile
+        ? `${updated.user.profile.firstName} ${updated.user.profile.lastName}`
+        : undefined,
     };
   }
 }
