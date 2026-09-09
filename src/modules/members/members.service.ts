@@ -15,6 +15,7 @@ import { MemberStatus } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
+import { SearchMembersDto } from "./dto/search-members.dto";
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -157,16 +158,47 @@ export class MembersService {
   // ============================================================
   // FIND ALL
   // ============================================================
+  // Sin params -> lista todo (comportamiento previo).
+  // q      -> busca por nombre, apellido, cédula o email.
+  // status -> filtra por estado.
+  // ============================================================
 
-  findAll(gymId: string) {
-    return this.prisma.member.findMany({
-      where: { gymId },
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: { include: { profile: true } },
-        memberships: { include: { plan: true } },
-      },
-    });
+  async findAll(gymId: string, query: SearchMembersDto) {
+    const { q, status, page = 1, pageSize = 20 } = query;
+    const tokens = q?.trim().split(/\s+/).filter(Boolean) ?? [];
+
+    const where = {
+      gymId,
+      ...(status ? { status } : {}),
+      ...(tokens.length
+        ? {
+            AND: tokens.map((token) => ({
+              OR: [
+                { identificationNumber: { contains: token, mode: "insensitive" as const } },
+                { user: { email: { contains: token, mode: "insensitive" as const } } },
+                { user: { profile: { firstName: { contains: token, mode: "insensitive" as const } } } },
+                { user: { profile: { lastName: { contains: token, mode: "insensitive" as const } } } },
+              ],
+            })),
+          }
+        : {}),
+    };
+
+    const [total, data] = await this.prisma.$transaction([
+      this.prisma.member.count({ where }),
+      this.prisma.member.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          user: { include: { profile: true } },
+          memberships: { include: { plan: true } },
+        },
+      }),
+    ]);
+
+    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
   // ============================================================

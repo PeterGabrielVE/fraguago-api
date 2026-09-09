@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 
@@ -23,6 +24,7 @@ import { Role } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
+import { SearchMembersDto } from "./dto/search-members.dto";
 
 @Controller("members")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -37,8 +39,8 @@ export class MembersController {
 
   @Get()
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
-  findAll(@GymId() gymId: string) {
-    return this.service.findAll(gymId);
+  findAll(@GymId() gymId: string, @Query() query: SearchMembersDto) {
+    return this.service.findAll(gymId, query);
   }
 
   @Get(":id")
