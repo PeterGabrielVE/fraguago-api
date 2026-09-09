@@ -19,6 +19,7 @@ import { RolesGuard } from "../../common/roles.guard";
 import { GymId } from "../../auth/decorators/gym-id.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { Role } from "@prisma/client";
+import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 
 @Controller("members")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -76,4 +77,14 @@ export class MembersController {
   ) {
     return this.service.changeStatus(gymId, id, dto.status);
   }
+
+  @Get(':id/emergency-contact')
+  getEmergencyContact(
+    @GymId() gymId: string,          
+    @Param('id') id: string,
+  ): Promise<EmergencyContactResponseDto> {
+    return this.service.getEmergencyContact(gymId, id);
+  }
+
+  
 }

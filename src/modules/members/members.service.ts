@@ -12,6 +12,7 @@ import { PasswordService } from "../../auth/password.service";
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
 import { MemberStatus } from "@prisma/client";
+import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -292,7 +293,6 @@ export class MembersService {
     };
   }
 
-
   private readonly ALLOWED_TRANSITIONS: Record<MemberStatus, MemberStatus[]> = {
     ACTIVE: [MemberStatus.SUSPENDED, MemberStatus.INACTIVE],
     SUSPENDED: [MemberStatus.ACTIVE, MemberStatus.INACTIVE],
@@ -338,5 +338,22 @@ export class MembersService {
         ? `${updated.user.profile.firstName} ${updated.user.profile.lastName}`
         : undefined,
     };
+  }
+  async getEmergencyContact(
+    gymId: string,
+    memberId: string,
+  ): Promise<EmergencyContactResponseDto> {
+
+    const contact = await this.prisma.emergencyContact.findFirst({
+      where: { memberId, gymId },
+    });
+
+    if (!contact) {
+      throw new NotFoundException(
+        `No emergency contact found for member ${memberId}`,
+      );
+    }
+
+    return new EmergencyContactResponseDto(contact);
   }
 }
