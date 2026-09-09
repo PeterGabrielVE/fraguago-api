@@ -1,37 +1,4 @@
-import {
-  IsEmail,
-  IsOptional,
-  IsString,
-  IsDateString,
-  IsEnum,
-} from 'class-validator';
-import { MemberStatus } from "@prisma/client";
-export class UpdateMemberDto {
-  @IsOptional()
-  @IsString()
-  firstName?: string;
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateMemberDto } from './create-member.dto';
 
-  @IsOptional()
-  @IsString()
-  lastName?: string;
-
-  @IsOptional()
-  @IsEmail()
-  email?: string;
-
-  @IsOptional()
-  @IsString()
-  phone?: string;
-
-  @IsOptional()
-  @IsDateString()
-  birthDate?: string;
-
-  @IsOptional()
-  @IsString()
-  guardianPhone?: string;
-
-  @IsOptional()
-  @IsEnum(MemberStatus)
-  status?: MemberStatus;
-}
+export class UpdateMemberDto extends PartialType(CreateMemberDto) {}

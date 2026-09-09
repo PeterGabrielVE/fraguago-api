@@ -1,12 +1,12 @@
 import {
-  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import * as bcrypt from "bcrypt";
+import { randomBytes } from "crypto";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
+import { PasswordService } from "../../auth/password.service";
 
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
@@ -16,7 +16,6 @@ function ageFrom(iso: string): number {
   const dob = new Date(iso);
 
   let age = today.getFullYear() - dob.getFullYear();
-
   const m = today.getMonth() - dob.getMonth();
 
   if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
@@ -28,50 +27,75 @@ function ageFrom(iso: string): number {
 
 @Injectable()
 export class MembersService {
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
+  constructor(
+    @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
+    private readonly passwords: PasswordService,
+  ) {}
+
+  // ============================================================
+  // VALIDACIÓN REUTILIZABLE (create + update)
+  // ============================================================
+  //
+  // Valida que email (en User) y cédula (en Member) no colisionen con
+  // OTRO registro del mismo gym. En update se pasa excludeMemberId para
+  // que el propio member no se marque como duplicado de sí mismo.
+  // ============================================================
+
+  private async assertNoDuplicates(
+    gymId: string,
+    data: { email?: string; identificationNumber?: string },
+    excludeMemberId?: string,
+  ) {
+    if (data.email) {
+      const existingUser = await this.prisma.user.findFirst({
+        where: {
+          gymId,
+          email: data.email,
+          ...(excludeMemberId
+            ? { member: { id: { not: excludeMemberId } } }
+            : {}),
+        },
+      });
+      if (existingUser) {
+        throw new ConflictException(
+          "That email is already registered in this gym.",
+        );
+      }
+    }
+
+    if (data.identificationNumber) {
+      const existingMember = await this.prisma.member.findFirst({
+        where: {
+          gymId,
+          identificationNumber: data.identificationNumber,
+          ...(excludeMemberId ? { id: { not: excludeMemberId } } : {}),
+        },
+      });
+      if (existingMember) {
+        throw new ConflictException(
+          `Ya existe un miembro con la cédula ${data.identificationNumber}.`,
+        );
+      }
+    }
+  }
 
   // ============================================================
   // CREATE MEMBER
   // ============================================================
   //
-  // Creates:
-  //
-  // User
-  //   └── Profile
-  //   └── Member
-  //
-  // User:
-  //   - email
-  //   - passwordHash
-  //   - role
-  //   - gymId
-  //
-  // Profile:
-  //   - firstName
-  //   - lastName
-  //   - phone
-  //
-  // Member:
-  //   - birthDate
-  //   - guardian information
-  //   - status
+  // Creates: User └── Profile └── Member
   // ============================================================
 
   async create(gymId: string, dto: CreateMemberDto) {
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        gymId,
-        email: dto.email,
-      },
+    await this.assertNoDuplicates(gymId, {
+      email: dto.email,
+      identificationNumber: dto.identificationNumber,
     });
 
-    if (existingUser) {
-      throw new ConflictException(
-        "That email is already registered in this gym.",
-      );
-    }
-
-    const passwordHash = await bcrypt.hash(dto.password ?? "12345678", 12);
+    // Nunca un password por defecto fijo: si no viene, generamos uno
+    // aleatorio. El miembro deberá resetearlo (flujo de activación).
+    const rawPassword = dto.password ?? randomBytes(16).toString("hex");
+    const passwordHash = await this.passwords.hash(rawPassword);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -95,22 +119,16 @@ export class MembersService {
         data: {
           gymId,
           userId: user.id,
-
           identificationNumber: dto.identificationNumber,
-
           birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
-
           activityLevel: dto.activityLevel,
           preferredShift: dto.preferredShift,
           primaryGoal: dto.primaryGoal,
           goalDescription: dto.goalDescription,
         },
-
         include: {
           user: {
-            include: {
-              profile: true,
-            },
+            include: { profile: true },
           },
         },
       });
@@ -140,16 +158,8 @@ export class MembersService {
       where: { gymId },
       orderBy: { createdAt: "desc" },
       include: {
-        user: {
-          include: {
-            profile: true,
-          },
-        },
-        memberships: {
-          include: {
-            plan: true,
-          },
-        },
+        user: { include: { profile: true } },
+        memberships: { include: { plan: true } },
       },
     });
   }
@@ -160,21 +170,10 @@ export class MembersService {
 
   async findOne(gymId: string, id: string) {
     const member = await this.prisma.member.findFirst({
-      where: {
-        id,
-        gymId,
-      },
+      where: { id, gymId },
       include: {
-        user: {
-          include: {
-            profile: true,
-          },
-        },
-        memberships: {
-          include: {
-            plan: true,
-          },
-        },
+        user: { include: { profile: true } },
+        memberships: { include: { plan: true } },
       },
     });
 
@@ -184,12 +183,21 @@ export class MembersService {
 
     return member;
   }
+
   // ============================================================
   // UPDATE
   // ============================================================
 
   async update(gymId: string, id: string, dto: UpdateMemberDto) {
+    // Confirma existencia + pertenencia al gym (aislamiento tenant).
     const member = await this.findOne(gymId, id);
+
+    // Valida duplicados excluyéndose a sí mismo.
+    await this.assertNoDuplicates(
+      gymId,
+      { email: dto.email, identificationNumber: dto.identificationNumber },
+      id,
+    );
 
     const {
       firstName,
@@ -197,66 +205,47 @@ export class MembersService {
       phone,
       email,
       birthDate,
-      status,
+      identificationNumber,
+      activityLevel,
+      preferredShift,
+      primaryGoal,
+      goalDescription,
     } = dto;
 
     return this.prisma.$transaction(async (tx) => {
-      // ----------------------------------------------------------
       // Update User
-      // ----------------------------------------------------------
-
       if (email) {
         await tx.user.update({
-          where: {
-            id: member.userId,
-          },
-          data: {
-            email,
-          },
+          where: { id: member.userId },
+          data: { email },
         });
       }
 
-      // ----------------------------------------------------------
       // Update Profile
-      // ----------------------------------------------------------
-
       if (
         firstName !== undefined ||
         lastName !== undefined ||
         phone !== undefined
       ) {
         await tx.profile.update({
-          where: {
-            userId: member.userId,
-          },
-          data: {
-            firstName,
-            lastName,
-            phone,
-          },
+          where: { userId: member.userId },
+          data: { firstName, lastName, phone },
         });
       }
 
-      // ----------------------------------------------------------
       // Update Member
-      // ----------------------------------------------------------
-
       return tx.member.update({
-        where: {
-          id,
-        },
-
+        where: { id },
         data: {
+          identificationNumber,
           birthDate: birthDate ? new Date(birthDate) : undefined,
-          status,
+          activityLevel,
+          preferredShift,
+          primaryGoal,
+          goalDescription,
         },
-
         include: {
-          user: {
-            include: {
-              profile: true,
-            },
-          },
+          user: { include: { profile: true } },
         },
       });
     });
@@ -269,18 +258,10 @@ export class MembersService {
   async remove(gymId: string, id: string) {
     const member = await this.findOne(gymId, id);
 
-    // Member -> User -> Profile
-    //
-    // Because Member.user and User.profile use
-    // onDelete: Cascade, deleting User will also delete Profile.
-    //
-    // But Member itself references User, so deleting Member
-    // first is the safest approach.
-
+    // Member -> User -> Profile con onDelete: Cascade.
+    // Borrar el Member primero es lo más seguro.
     return this.prisma.member.delete({
-      where: {
-        id: member.id,
-      },
+      where: { id: member.id },
     });
   }
 
@@ -288,35 +269,17 @@ export class MembersService {
   // CARD DATA
   // ============================================================
 
-  // Minimal data for an ID card:
-  // name, id, gym, active membership.
-
   async cardData(gymId: string, id: string) {
     const member = await this.findOne(gymId, id);
 
     const membership = await this.prisma.membership.findFirst({
-      where: {
-        gymId,
-        memberId: id,
-        status: "active",
-      },
-
-      orderBy: {
-        endDate: "desc",
-      },
-
-      include: {
-        plan: {
-          select: {
-            name: true,
-          },
-        },
-      },
+      where: { gymId, memberId: id, status: "active" },
+      orderBy: { endDate: "desc" },
+      include: { plan: { select: { name: true } } },
     });
 
     const firstName = member.user.profile?.firstName ?? "";
     const lastName = member.user.profile?.lastName ?? "";
-
     const fullName = `${firstName} ${lastName}`.trim();
 
     return {

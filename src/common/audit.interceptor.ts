@@ -1,5 +1,5 @@
 import {
-  CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor,
+  CallHandler, ExecutionContext, HttpException, Injectable, Logger, NestInterceptor,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Observable, tap } from 'rxjs';
@@ -51,13 +51,22 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: (result) => this.persist(
-          gymId, userId, finalAction, entity, result?.id,
+          gymId, userId, finalAction, entity, result?.id ?? req.params?.id,
           { ...baseMeta, outcome: 'SUCCESS' },
         ),
-        error: (err) => this.persist(
-          gymId, userId, finalAction, entity, req.params?.id,
-          { ...baseMeta, outcome: 'FAILURE', error: err?.message ?? String(err) },
-        ),
+        error: (err) => {
+          // Errores de cliente esperables (4xx: validación, conflicto, no
+          // encontrado) NO son incidentes de auditoría: son flujo normal.
+          // Solo auditamos fallos inesperados (5xx o no-HTTP).
+          const status =
+            err instanceof HttpException ? err.getStatus() : 500;
+          if (status < 500) return; // 4xx → no auditar
+
+          this.persist(
+            gymId, userId, finalAction, entity, req.params?.id,
+            { ...baseMeta, outcome: 'FAILURE', error: err?.message ?? String(err) },
+          );
+        },
       }),
     );
   }

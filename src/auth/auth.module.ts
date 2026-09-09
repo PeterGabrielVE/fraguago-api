@@ -24,6 +24,6 @@ import { AuthAuditService } from './auth-audit.service';
     PasswordService,
     AuthAuditService,
   ],
-  exports: [AuthService],
+  exports: [AuthService, AuthPrismaService, PasswordService, AuthAuditService],
 })
 export class AuthModule {}
