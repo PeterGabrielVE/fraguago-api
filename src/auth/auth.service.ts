@@ -7,24 +7,31 @@ import { JwtService, JwtSignOptions } from "@nestjs/jwt";
 import { createHash, randomBytes } from "crypto";
 import { AuthPrismaService } from "./auth-prisma.service";
 import { PasswordService } from "./password.service";
+import { AuthAuditService } from "./auth-audit.service";
 
 @Injectable()
 export class AuthService {
   // Hash bcrypt real para igualar el tiempo de cómputo cuando el email
   // no existe (evita enumeración de usuarios por timing). Reemplázalo por
   // uno generado en tu entorno (ver nota abajo).
-  private readonly DUMMY_HASH = "$2b$12$Qj/b6I7d6tI7S7juF0qcjOv76BMt3vgDyd8Zn6peXnjMvOA5QWota";
+  private readonly DUMMY_HASH =
+    "$2b$12$Qj/b6I7d6tI7S7juF0qcjOv76BMt3vgDyd8Zn6peXnjMvOA5QWota";
 
   constructor(
     private readonly prisma: AuthPrismaService,
     private readonly jwtService: JwtService,
     private readonly passwords: PasswordService,
+    private readonly audit: AuthAuditService,
   ) {}
 
   // =====================================================================
   // LOGIN
   // =====================================================================
-  async login(email: string, password: string) {
+  async login(
+    email: string,
+    password: string,
+    ctx?: { ip?: string; userAgent?: string },
+  ) {
     const user = await this.prisma.user.findFirst({
       where: { email },
       include: { gym: true, profile: true },
@@ -36,6 +43,14 @@ export class AuthService {
     const passwordValid = await this.passwords.verify(password, hashToCompare);
 
     if (!user || !passwordValid) {
+      if (user) {
+        await this.audit.log({
+          gymId: user.gymId,
+          userId: user.id,
+          action: "LOGIN_FAILED",
+          meta: { email, reason: "bad_password", ip: ctx?.ip },
+        });
+      }
       throw new UnauthorizedException("Invalid credentials");
     }
 
@@ -44,6 +59,13 @@ export class AuthService {
       email: user.email,
       gymId: user.gymId,
       role: user.role,
+    });
+
+    await this.audit.log({
+      gymId: user.gymId,
+      userId: user.id,
+      action: "LOGIN_SUCCESS",
+      meta: { ip: ctx?.ip, userAgent: ctx?.userAgent },
     });
 
     return {
@@ -92,6 +114,15 @@ export class AuthService {
 
     // Token ya revocado que se reusa → posible robo: quemamos todo.
     if (stored.revoked) {
+      const u = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+      if (u) {
+        await this.audit.log({
+          gymId: u.gymId,
+          userId: u.id,
+          action: 'TOKEN_REUSE_DETECTED',
+          meta: { severity: 'high' },
+        });
+      }
       await this.logoutAll(payload.sub);
       throw new UnauthorizedException("Refresh token reuse detected");
     }
@@ -111,6 +142,11 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException("Invalid refresh token");
 
+    await this.audit.log({
+      gymId: user.gymId,
+      userId: user.id,
+      action: 'TOKEN_REFRESH',
+    });
     return this.issueTokens({
       sub: user.id,
       email: user.email,
@@ -122,24 +158,51 @@ export class AuthService {
   // =====================================================================
   // LOGOUT (revoca un refresh token)
   // =====================================================================
-  async logout(refreshToken?: string) {
-    if (!refreshToken) return { success: true };
-    const tokenHash = this.hashToken(refreshToken);
-    await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revoked: false },
-      data: { revoked: true },
-    });
+  async logout(
+    refreshToken: string | undefined,
+    actor?: { id: string; gymId: string },
+    ctx?: { ip?: string },
+  ) {
+    if (refreshToken) {
+      const tokenHash = this.hashToken(refreshToken);
+      await this.prisma.refreshToken.updateMany({
+        where: { tokenHash, revoked: false },
+        data: { revoked: true },
+      });
+    }
+
+    if (actor) {
+      await this.audit.log({
+        gymId: actor.gymId,
+        userId: actor.id,
+        action: "LOGOUT",
+        meta: { ip: ctx?.ip },
+      });
+    }
     return { success: true };
   }
 
   // =====================================================================
   // LOGOUT ALL (revoca TODOS los refresh tokens del usuario)
   // =====================================================================
-  async logoutAll(userId: string) {
+  async logoutAll(
+    userId: string,
+    actor?: { gymId: string },
+    ctx?: { ip?: string },
+  ) {
     await this.prisma.refreshToken.updateMany({
       where: { userId, revoked: false },
       data: { revoked: true },
     });
+
+    if (actor) {
+      await this.audit.log({
+        gymId: actor.gymId,
+        userId,
+        action: "LOGOUT_ALL",
+        meta: { ip: ctx?.ip },
+      });
+    }
     return { success: true };
   }
 

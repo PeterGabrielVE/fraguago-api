@@ -7,6 +7,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthPrismaService } from './auth-prisma.service';
 import { PasswordService } from './password.service';
+import { AuthAuditService } from './auth-audit.service';
 
 @Module({
   imports: [
@@ -20,7 +21,8 @@ import { PasswordService } from './password.service';
     AuthService,
     JwtStrategy,
     AuthPrismaService,
-    PasswordService
+    PasswordService,
+    AuthAuditService,
   ],
   exports: [AuthService],
 })
