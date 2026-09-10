@@ -28,6 +28,7 @@ import { HealthProfilesModule } from './modules/health-profiles/health-profiles.
 import { TenantInterceptor } from './common/tenant/tenant.interceptor';
 import { RolesGuard } from './common/roles.guard';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
     ReportsModule,
     RemindersModule,
     HealthProfilesModule,
+    DashboardModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
