@@ -1,6 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { MemberStatus, TransactionType } from '@prisma/client';
-import { ScopedPrismaClient, TENANT_PRISMA } from 'src/prisma/prisma.service';
+import { Inject, Injectable } from "@nestjs/common";
+import { MemberStatus, TransactionType } from "@prisma/client";
+import { ScopedPrismaClient, TENANT_PRISMA } from "src/prisma/prisma.service";
 
 @Injectable()
 export class DashboardService {
@@ -46,20 +46,34 @@ export class DashboardService {
     return [...buckets.entries()].map(([date, value]) => ({ date, value }));
   }
 
-
-    async all(gymId: string) {
-        const [summary, members, attendance, revenue, expenses, memberships, sales] =
-        await Promise.all([
-            this.summary(gymId),
-            this.members(gymId),
-            this.attendance(gymId),
-            this.revenue(gymId),
-            this.expenses(gymId),
-            this.memberships(gymId),
-            this.sales(gymId),
-        ]);
-        return { summary, members, attendance, revenue, expenses, memberships, sales };
-    }
+  async all(gymId: string) {
+    const [
+      summary,
+      members,
+      attendance,
+      revenue,
+      expenses,
+      memberships,
+      sales,
+    ] = await Promise.all([
+      this.summary(gymId),
+      this.members(gymId),
+      this.attendance(gymId),
+      this.revenue(gymId),
+      this.expenses(gymId),
+      this.memberships(gymId),
+      this.sales(gymId),
+    ]);
+    return {
+      summary,
+      members,
+      attendance,
+      revenue,
+      expenses,
+      memberships,
+      sales,
+    };
+  }
   // ============================================================
   // B01 — GET /dashboard/summary
   // KPIs de cabecera: socios activos, check-ins de hoy,
@@ -77,13 +91,13 @@ export class DashboardService {
         }),
         // FIX: Membership.status es String "active", NO el enum MemberStatus.
         this.prisma.membership.count({
-          where: { gymId, status: 'active', endDate: { gte: now } },
+          where: { gymId, status: "active", endDate: { gte: now } },
         }),
         this.prisma.attendance.count({
           where: { gymId, checkedInAt: { gte: startDay } },
         }),
         this.prisma.transaction.groupBy({
-          by: ['type'],
+          by: ["type"],
           where: { gymId, date: { gte: startMonth } },
           _sum: { amount: true },
         }),
@@ -113,7 +127,7 @@ export class DashboardService {
 
     const [grouped, newThisMonth, total] = await Promise.all([
       this.prisma.member.groupBy({
-        by: ['status'],
+        by: ["status"],
         where: { gymId },
         _count: { _all: true },
       }),
@@ -203,17 +217,17 @@ export class DashboardService {
 
     const [active, expired, expiringSoon, byPlan] = await Promise.all([
       this.prisma.membership.count({
-        where: { gymId, status: 'active', endDate: { gte: now } },
+        where: { gymId, status: "active", endDate: { gte: now } },
       }),
       this.prisma.membership.count({
         where: { gymId, endDate: { lt: now } },
       }),
       this.prisma.membership.count({
-        where: { gymId, status: 'active', endDate: { gte: now, lte: in7 } },
+        where: { gymId, status: "active", endDate: { gte: now, lte: in7 } },
       }),
       this.prisma.membership.groupBy({
-        by: ['planId'],
-        where: { gymId, status: 'active', endDate: { gte: now } },
+        by: ["planId"],
+        where: { gymId, status: "active", endDate: { gte: now } },
         _count: { _all: true },
       }),
     ]);
@@ -232,7 +246,7 @@ export class DashboardService {
       expiringSoon,
       byPlan: byPlan.map((p) => ({
         planId: p.planId,
-        plan: nameById.get(p.planId) ?? 'Desconocido',
+        plan: nameById.get(p.planId) ?? "Desconocido",
         count: p._count._all,
       })),
     };
@@ -241,21 +255,29 @@ export class DashboardService {
   // ============================================================
   // B07 — GET /dashboard/sales
   // Ventas del mes: total facturado, unidades y top productos.
+  // Facturación/nº de tickets → Sale; unidades/productos → SaleItem.
   // ============================================================
   async sales(gymId: string) {
     const from = this.startOfMonth();
 
-    const [agg, byProduct] = await Promise.all([
+    const [saleAgg, itemsAgg, byProduct] = await Promise.all([
+      // Facturación y nº de ventas: sobre la cabecera Sale.
       this.prisma.sale.aggregate({
         where: { gymId, soldAt: { gte: from } },
-        _sum: { total: true, quantity: true },
+        _sum: { total: true },
         _count: { _all: true },
       }),
-      this.prisma.sale.groupBy({
-        by: ['productId'],
-        where: { gymId, soldAt: { gte: from } },
-        _sum: { total: true, quantity: true },
-        orderBy: { _sum: { total: 'desc' } },
+      // Unidades totales despachadas: sobre SaleItem, filtrando por la venta.
+      this.prisma.saleItem.aggregate({
+        where: { gymId, sale: { soldAt: { gte: from } } },
+        _sum: { quantity: true },
+      }),
+      // Top productos: se agrupa por productId en SaleItem.
+      this.prisma.saleItem.groupBy({
+        by: ["productId"],
+        where: { gymId, sale: { soldAt: { gte: from } } },
+        _sum: { subtotal: true, quantity: true },
+        orderBy: { _sum: { subtotal: "desc" } },
         take: 5,
       }),
     ]);
@@ -268,13 +290,13 @@ export class DashboardService {
     const nameById = new Map(products.map((p) => [p.id, p.name]));
 
     return {
-      totalRevenue: Number(agg._sum.total ?? 0),
-      unitsSold: agg._sum.quantity ?? 0,
-      saleCount: agg._count._all,
+      totalRevenue: Number(saleAgg._sum.total ?? 0),
+      unitsSold: itemsAgg._sum.quantity ?? 0,
+      saleCount: saleAgg._count._all,
       topProducts: byProduct.map((p) => ({
         productId: p.productId,
-        product: nameById.get(p.productId) ?? 'Desconocido',
-        revenue: Number(p._sum.total ?? 0),
+        product: nameById.get(p.productId) ?? "Desconocido",
+        revenue: Number(p._sum.subtotal ?? 0),
         units: p._sum.quantity ?? 0,
       })),
     };
