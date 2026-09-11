@@ -29,6 +29,8 @@ import { TenantInterceptor } from './common/tenant/tenant.interceptor';
 import { RolesGuard } from './common/roles.guard';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { UsersModule } from './users/users.module';
+import { GymModule } from './modules/gym/gym.module';
 
 @Module({
   imports: [
@@ -54,7 +56,9 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     ReportsModule,
     RemindersModule,
     HealthProfilesModule,
-    DashboardModule
+    DashboardModule,
+    UsersModule,
+    GymModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
