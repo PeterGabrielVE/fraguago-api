@@ -7,6 +7,27 @@ CREATE TYPE "ConceptKind" AS ENUM ('INCOME', 'EXPENSE');
 -- CreateEnum
 CREATE TYPE "TransactionType" AS ENUM ('INCOME', 'EXPENSE');
 
+-- CreateEnum
+CREATE TYPE "MemberStatus" AS ENUM ('ACTIVE', 'INACTIVE', 'SUSPENDED');
+
+-- CreateEnum
+CREATE TYPE "ActivityLevel" AS ENUM ('BEGINNER', 'INTERMEDIATE', 'ADVANCED');
+
+-- CreateEnum
+CREATE TYPE "TrainingShift" AS ENUM ('MORNING', 'AFTERNOON', 'NIGHT');
+
+-- CreateEnum
+CREATE TYPE "TrainingGoal" AS ENUM ('MUSCLE_GAIN', 'WEIGHT_LOSS', 'GENERAL_WELLNESS', 'PERFORMANCE_REHABILITATION');
+
+-- CreateEnum
+CREATE TYPE "MembershipType" AS ENUM ('DAILY', 'MONTHLY', 'QUARTERLY', 'ANNUAL');
+
+-- CreateEnum
+CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'CARD', 'TRANSFER', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "AttendanceShift" AS ENUM ('MORNING', 'AFTERNOON', 'NIGHT');
+
 -- CreateTable
 CREATE TABLE "Gym" (
     "id" TEXT NOT NULL,
@@ -30,14 +51,27 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
+CREATE TABLE "RefreshToken" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "tokenHash" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "revoked" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Profile" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
     "firstName" TEXT NOT NULL,
     "lastName" TEXT NOT NULL,
     "phone" TEXT,
+    "address" TEXT,
     "avatarUrl" TEXT,
-    "gymId" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -49,14 +83,52 @@ CREATE TABLE "Member" (
     "id" TEXT NOT NULL,
     "gymId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "identificationNumber" TEXT NOT NULL,
     "birthDate" TIMESTAMP(3),
-    "guardianName" TEXT,
-    "guardianPhone" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'active',
+    "activityLevel" "ActivityLevel",
+    "preferredShift" "TrainingShift",
+    "primaryGoal" "TrainingGoal",
+    "goalDescription" TEXT,
+    "status" "MemberStatus" NOT NULL DEFAULT 'ACTIVE',
     "joinedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Member_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "EmergencyContact" (
+    "id" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
+    "memberId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "relationship" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "EmergencyContact_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MedicalProfile" (
+    "id" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
+    "memberId" TEXT NOT NULL,
+    "hypertension" BOOLEAN NOT NULL DEFAULT false,
+    "diabetes" BOOLEAN NOT NULL DEFAULT false,
+    "heartProblems" BOOLEAN NOT NULL DEFAULT false,
+    "asthma" BOOLEAN NOT NULL DEFAULT false,
+    "otherConditions" TEXT,
+    "hasInjury" BOOLEAN NOT NULL DEFAULT false,
+    "injuryDescription" TEXT,
+    "takesMedication" BOOLEAN NOT NULL DEFAULT false,
+    "medicationDescription" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "MedicalProfile_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -64,6 +136,7 @@ CREATE TABLE "MembershipPlan" (
     "id" TEXT NOT NULL,
     "gymId" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "type" "MembershipType" NOT NULL,
     "price" DECIMAL(10,2) NOT NULL,
     "durationDays" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -81,6 +154,7 @@ CREATE TABLE "Membership" (
     "endDate" TIMESTAMP(3) NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'active',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Membership_pkey" PRIMARY KEY ("id")
 );
@@ -128,8 +202,10 @@ CREATE TABLE "Transaction" (
     "conceptId" TEXT,
     "memberId" TEXT,
     "amount" DECIMAL(10,2) NOT NULL,
+    "paymentMethod" "PaymentMethod",
     "note" TEXT,
     "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdById" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Transaction_pkey" PRIMARY KEY ("id")
@@ -182,6 +258,9 @@ CREATE TABLE "Attendance" (
     "gymId" TEXT NOT NULL,
     "memberId" TEXT NOT NULL,
     "checkedInAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "shift" "AttendanceShift" NOT NULL,
+    "passType" "MembershipType",
+    "signature" TEXT,
 
     CONSTRAINT "Attendance_pkey" PRIMARY KEY ("id")
 );
@@ -203,15 +282,26 @@ CREATE TABLE "Product" (
 CREATE TABLE "Sale" (
     "id" TEXT NOT NULL,
     "gymId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
     "memberId" TEXT,
-    "quantity" INTEGER NOT NULL DEFAULT 1,
-    "unitPrice" DECIMAL(10,2) NOT NULL,
     "total" DECIMAL(10,2) NOT NULL,
+    "createdById" TEXT,
     "soldAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Sale_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "SaleItem" (
+    "id" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
+    "saleId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "quantity" INTEGER NOT NULL,
+    "unitPrice" DECIMAL(10,2) NOT NULL,
+    "subtotal" DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT "SaleItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -232,17 +322,34 @@ CREATE TABLE "Measurement" (
     CONSTRAINT "Measurement_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE INDEX "Gym_name_idx" ON "Gym"("name");
+-- CreateTable
+CREATE TABLE "StockMovement" (
+    "id" TEXT NOT NULL,
+    "gymId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "change" INTEGER NOT NULL,
+    "resultingStock" INTEGER NOT NULL,
+    "reason" TEXT,
+    "createdById" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "StockMovement_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE INDEX "Gym_name_idx" ON "Gym"("name");
 
 -- CreateIndex
 CREATE INDEX "User_gymId_idx" ON "User"("gymId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_gymId_email_key" ON "User"("gymId", "email");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_userId_idx" ON "RefreshToken"("userId");
+
+-- CreateIndex
+CREATE INDEX "RefreshToken_tokenHash_idx" ON "RefreshToken"("tokenHash");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Profile_userId_key" ON "Profile"("userId");
@@ -260,7 +367,31 @@ CREATE INDEX "Member_gymId_idx" ON "Member"("gymId");
 CREATE INDEX "Member_userId_idx" ON "Member"("userId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Member_gymId_identificationNumber_key" ON "Member"("gymId", "identificationNumber");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "EmergencyContact_memberId_key" ON "EmergencyContact"("memberId");
+
+-- CreateIndex
+CREATE INDEX "EmergencyContact_gymId_idx" ON "EmergencyContact"("gymId");
+
+-- CreateIndex
+CREATE INDEX "EmergencyContact_memberId_idx" ON "EmergencyContact"("memberId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MedicalProfile_memberId_key" ON "MedicalProfile"("memberId");
+
+-- CreateIndex
+CREATE INDEX "MedicalProfile_gymId_idx" ON "MedicalProfile"("gymId");
+
+-- CreateIndex
+CREATE INDEX "MedicalProfile_memberId_idx" ON "MedicalProfile"("memberId");
+
+-- CreateIndex
 CREATE INDEX "MembershipPlan_gymId_idx" ON "MembershipPlan"("gymId");
+
+-- CreateIndex
+CREATE INDEX "MembershipPlan_gymId_type_idx" ON "MembershipPlan"("gymId", "type");
 
 -- CreateIndex
 CREATE INDEX "Membership_gymId_idx" ON "Membership"("gymId");
@@ -302,6 +433,9 @@ CREATE INDEX "Transaction_gymId_type_idx" ON "Transaction"("gymId", "type");
 CREATE INDEX "Transaction_memberId_idx" ON "Transaction"("memberId");
 
 -- CreateIndex
+CREATE INDEX "Transaction_createdById_idx" ON "Transaction"("createdById");
+
+-- CreateIndex
 CREATE INDEX "Service_gymId_idx" ON "Service"("gymId");
 
 -- CreateIndex
@@ -338,13 +472,19 @@ CREATE INDEX "Product_gymId_sku_idx" ON "Product"("gymId", "sku");
 CREATE INDEX "Sale_gymId_idx" ON "Sale"("gymId");
 
 -- CreateIndex
-CREATE INDEX "Sale_productId_idx" ON "Sale"("productId");
-
--- CreateIndex
 CREATE INDEX "Sale_memberId_idx" ON "Sale"("memberId");
 
 -- CreateIndex
 CREATE INDEX "Sale_gymId_soldAt_idx" ON "Sale"("gymId", "soldAt");
+
+-- CreateIndex
+CREATE INDEX "SaleItem_gymId_idx" ON "SaleItem"("gymId");
+
+-- CreateIndex
+CREATE INDEX "SaleItem_saleId_idx" ON "SaleItem"("saleId");
+
+-- CreateIndex
+CREATE INDEX "SaleItem_productId_idx" ON "SaleItem"("productId");
 
 -- CreateIndex
 CREATE INDEX "Measurement_gymId_idx" ON "Measurement"("gymId");
@@ -355,8 +495,20 @@ CREATE INDEX "Measurement_memberId_idx" ON "Measurement"("memberId");
 -- CreateIndex
 CREATE INDEX "Measurement_gymId_memberId_date_idx" ON "Measurement"("gymId", "memberId", "date");
 
+-- CreateIndex
+CREATE INDEX "StockMovement_gymId_idx" ON "StockMovement"("gymId");
+
+-- CreateIndex
+CREATE INDEX "StockMovement_productId_idx" ON "StockMovement"("productId");
+
+-- CreateIndex
+CREATE INDEX "StockMovement_gymId_createdAt_idx" ON "StockMovement"("gymId", "createdAt");
+
 -- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Profile" ADD CONSTRAINT "Profile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -369,6 +521,18 @@ ALTER TABLE "Member" ADD CONSTRAINT "Member_gymId_fkey" FOREIGN KEY ("gymId") RE
 
 -- AddForeignKey
 ALTER TABLE "Member" ADD CONSTRAINT "Member_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EmergencyContact" ADD CONSTRAINT "EmergencyContact_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "EmergencyContact" ADD CONSTRAINT "EmergencyContact_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MedicalProfile" ADD CONSTRAINT "MedicalProfile_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "MedicalProfile" ADD CONSTRAINT "MedicalProfile_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MembershipPlan" ADD CONSTRAINT "MembershipPlan_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -437,13 +601,25 @@ ALTER TABLE "Product" ADD CONSTRAINT "Product_gymId_fkey" FOREIGN KEY ("gymId") 
 ALTER TABLE "Sale" ADD CONSTRAINT "Sale_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Sale" ADD CONSTRAINT "Sale_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Sale" ADD CONSTRAINT "Sale_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Sale" ADD CONSTRAINT "Sale_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "SaleItem" ADD CONSTRAINT "SaleItem_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SaleItem" ADD CONSTRAINT "SaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "Sale"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SaleItem" ADD CONSTRAINT "SaleItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Measurement" ADD CONSTRAINT "Measurement_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Measurement" ADD CONSTRAINT "Measurement_memberId_fkey" FOREIGN KEY ("memberId") REFERENCES "Member"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StockMovement" ADD CONSTRAINT "StockMovement_gymId_fkey" FOREIGN KEY ("gymId") REFERENCES "Gym"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "StockMovement" ADD CONSTRAINT "StockMovement_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;

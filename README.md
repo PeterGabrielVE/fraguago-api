@@ -895,3 +895,8 @@ FraguaGo follows these principles:
 10. **The API must not depend on Supabase-specific authentication services.**
 11. **PostgreSQL is the source of truth for application data.**
 12. **Modules should follow the same controller → service → Prisma pattern.**
+
+
+docker compose exec postgres psql -U postgres -d fraguago -c "GRANT ALL ON SCHEMA public TO fraguago; GRANT ALL ON SCHEMA public TO fraguago_auth; GRANT ALL ON ALL TABLES IN SCHEMA public TO fraguago; GRANT ALL ON ALL TABLES IN SCHEMA public TO fraguago_auth; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO fraguago; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO fraguago_auth;"
+
+docker compose exec postgres psql -U postgres -d fraguago -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO fraguago; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO fraguago_auth;"
