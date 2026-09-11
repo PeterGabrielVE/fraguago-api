@@ -31,6 +31,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { UsersModule } from './users/users.module';
 import { GymModule } from './modules/gym/gym.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -58,7 +59,8 @@ import { GymModule } from './modules/gym/gym.module';
     HealthProfilesModule,
     DashboardModule,
     UsersModule,
-    GymModule
+    GymModule,
+    AiModule,             // AI-powered routine generation
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
