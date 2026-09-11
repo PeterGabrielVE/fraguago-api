@@ -1,58 +1,69 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ProgressService } from './progress.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { GymId } from '../../auth/decorators/gym-id.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { CreateMeasurementDto } from './dto/create-measurement.dto';
+import { UpdateMeasurementDto } from './dto/update-measurement.dto';
 
-@Controller('progress')
+@Controller() // <--- Se deja vacío para usar rutas absolutas
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ProgressController {
   constructor(private readonly service: ProgressService) {}
 
-  @Post()
-  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER) // Los entrenadores suelen registrar el progreso
+  // MEAS-B02
+  @Post('members/:memberId/measurements')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   create(
-    @GymId() g: string, 
-    @Body() dto: any
-  ) { 
-    return this.service.create(g, dto); 
+    @GymId() gymId: string,
+    @Param('memberId') memberId: string, // Extraído de la URL
+    @Body() dto: CreateMeasurementDto
+  ) {
+    return this.service.create(gymId, memberId, dto);
   }
 
-  @Get()
+  // MEAS-B01
+  @Get('members/:memberId/measurements')
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   findAll(
-    @GymId() g: string
-  ) { 
-    return this.service.findAll(g); 
+    @GymId() gymId: string,
+    @Param('memberId') memberId: string, // Extraído de la URL
+    @Query() pagination: PaginationDto
+  ) {
+    return this.service.findAll(gymId, pagination, memberId);
   }
 
-  @Get(':id')
+  // MEAS-B03
+  @Get('measurements/:id')
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   findOne(
-    @GymId() g: string, 
+    @GymId() gymId: string,
     @Param('id') id: string
-  ) { 
-    return this.service.findOne(g, id); 
+  ) {
+    return this.service.findOne(gymId, id);
   }
 
-  @Patch(':id')
-  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER) // Entrenadores pueden necesitar corregir una medida mal ingresada
+  // MEAS-B04
+  @Patch('measurements/:id')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   update(
-    @GymId() g: string, 
-    @Param('id') id: string, 
-    @Body() dto: any
-  ) { 
-    return this.service.update(g, id, dto); 
+    @GymId() gymId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateMeasurementDto
+  ) {
+    return this.service.update(gymId, id, dto);
   }
 
-  @Delete(':id')
-  @Roles(Role.ADMIN) // Solo Admin puede borrar permanentemente un registro de progreso
+  // MEAS-B05
+  @Delete('measurements/:id')
+  @Roles(Role.ADMIN)
   remove(
-    @GymId() g: string, 
+    @GymId() gymId: string,
     @Param('id') id: string
-  ) { 
-    return this.service.remove(g, id); 
+  ) {
+    return this.service.remove(gymId, id);
   }
 }
