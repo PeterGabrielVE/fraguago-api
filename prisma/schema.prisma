@@ -126,8 +126,9 @@ model Gym {
   attendances Attendance[]
 
   products Product[]
-  sales    Sale[]
-
+  sales     Sale[]  
+  saleItems SaleItem[]
+  stockMovements StockMovement[]
   measurements Measurement[]
 
   emergencyContacts EmergencyContact[]
@@ -291,7 +292,7 @@ model Member {
   routines     Routine[]
   transactions Transaction[]
   attendances  Attendance[]
-  sales        Sale[]
+  sales      Sale[]
   measurements Measurement[]
 
   @@unique([gymId, identificationNumber])
@@ -675,37 +676,58 @@ model Product {
   createdAt DateTime @default(now())
 
   gym   Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  sales Sale[]
+  saleItems      SaleItem[]
+  stockMovements StockMovement[]
 
   @@index([gymId])
   @@index([gymId, sku])
 }
 
 // =====================================================================
-// SALES / POS
+// SALES / POS  (cabecera del ticket)
 // =====================================================================
 
 model Sale {
-  id        String  @id @default(uuid())
-  gymId     String
-  productId String
-  memberId  String?
+  id       String  @id @default(uuid())
+  gymId    String
+  memberId String?  // opcional: venta a un socio o a público general
 
-  quantity  Int     @default(1)
-  unitPrice Decimal @db.Decimal(10, 2)
-  total     Decimal @db.Decimal(10, 2)
+  total Decimal @db.Decimal(10, 2) // suma de todos los items
 
-  soldAt    DateTime @default(now())
-  createdAt DateTime @default(now())
+  createdById String?  // user que registró la venta
+  soldAt      DateTime @default(now())
+  createdAt   DateTime @default(now())
 
-  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
-  member  Member? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  gym    Gym        @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  items  SaleItem[]
 
   @@index([gymId])
-  @@index([productId])
   @@index([memberId])
   @@index([gymId, soldAt])
+}
+
+// =====================================================================
+// SALE ITEMS  (detalle: cada producto dentro de una venta)
+// =====================================================================
+
+model SaleItem {
+  id     String @id @default(uuid())
+  gymId  String
+  saleId String
+
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2) // precio al momento de la venta
+  subtotal  Decimal @db.Decimal(10, 2) // quantity * unitPrice
+
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([gymId])
+  @@index([saleId])
+  @@index([productId])
 }
 
 // =====================================================================
@@ -736,4 +758,34 @@ model Measurement {
   @@index([gymId])
   @@index([memberId])
   @@index([gymId, memberId, date])
+}
+
+
+// =====================================================================
+// STOCK MOVEMENTS
+// =====================================================================
+//
+// Historial de cada ajuste de stock de un producto.
+// Cada fila es inmutable: registra qué cambió, cuánto, el stock
+// resultante, por qué y quién lo hizo. Nunca se edita ni se borra.
+// =====================================================================
+
+model StockMovement {
+  id    String @id @default(uuid())
+  gymId String
+
+  productId String
+  change    Int     // +entrada / -salida
+  resultingStock Int // stock del producto DESPUÉS del movimiento
+  reason    String?
+
+  createdById String? // user que hizo el ajuste
+  createdAt   DateTime @default(now())
+
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([productId])
+  @@index([gymId, createdAt])
 }
