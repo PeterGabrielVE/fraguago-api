@@ -1,14 +1,15 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
+import { WhatsappService } from "./whatsapp.service";
+import { SystemPrismaService } from "src/prisma/system-prisma.service";
 
 @Injectable()
 export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
 
-  constructor(@Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient) {}
+  //  EL CAMBIO CLAVE: SystemPrismaService (BYPASSRLS), no el scoped.
+  constructor(private readonly prisma: SystemPrismaService, private readonly whatsapp: WhatsappService) {}
 
-  // Builds a click-to-chat WhatsApp link with a pre-filled message. Free.
   private waLink(
     phone: string | null | undefined,
     message: string,
@@ -16,78 +17,57 @@ export class RemindersService {
     if (!phone) return null;
 
     let digits = phone.replace(/\D/g, "");
-
     const cc = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE?.replace(/\D/g, "");
 
-    // Prepend country code if missing.
-    if (cc && digits.length <= 10) {
-      digits = cc + digits;
+    if (cc) {
+      if (!digits.startsWith(cc)) {
+        // Quita el 0 inicial de móviles venezolanos (0414 → 414) antes del código. 
+        if (digits.startsWith("0")) digits = digits.slice(1);
+        digits = cc + digits;
+      }
     }
 
     return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
   }
 
   private message(name: string, plan: string, endDate: Date): string {
-    const fecha = endDate.toLocaleDateString("es-MX");
-
-    return `Hola ${name}, te recordamos que tu membresía ${plan} vence el ${fecha}. ¡Te esperamos en el gym!`;
+    const fecha = endDate.toLocaleDateString("es-VE");
+    return `¡Hola ${name}! Te recordamos que tu membresía ${plan} vence el ${fecha}. Renueva pronto y sigue rompiendo tus límites. ¡Nos vemos en tu próximo entreno!`;
   }
 
-  // ============================================================
-  // REMINDERS FOR ONE GYM
-  // ============================================================
-
-  // On-demand list for ONE gym.
-  // Used by the endpoint the owner opens daily.
+  // Lista para UN gym. SIEMPRE filtra por gymId explícito, porque este
+  // cliente ignora el RLS: el aislamiento lo garantiza este where.
   async buildForGym(gymId: string, days = 7) {
     const limit = new Date();
-
     limit.setDate(limit.getDate() + days);
 
     const memberships = await this.prisma.membership.findMany({
       where: {
-        gymId,
+        gymId, // obligatorio: la base NO filtra por vos con este cliente
         status: "active",
-        endDate: {
-          lte: limit,
-        },
+        endDate: { lte: limit, gte: new Date() }, // vence pronto, aún no vencida
       },
-
-      orderBy: {
-        endDate: "asc",
-      },
-
+      orderBy: { endDate: "asc" },
       include: {
         member: {
           include: {
             user: {
               include: {
                 profile: {
-                  select: {
-                    firstName: true,
-                    lastName: true,
-                    phone: true,
-                  },
+                  select: { firstName: true, lastName: true, phone: true },
                 },
               },
             },
           },
         },
-
-        plan: {
-          select: {
-            name: true,
-          },
-        },
+        plan: { select: { name: true } },
       },
     });
 
     return memberships.map((m) => {
       const name =
         `${m.member.user.profile?.firstName ?? ""} ${m.member.user.profile?.lastName ?? ""}`.trim();
-
       const phone = m.member.user.profile?.phone ?? null;
-
       return {
         memberName: name,
         plan: m.plan.name,
@@ -101,60 +81,35 @@ export class RemindersService {
     });
   }
 
-  // ============================================================
-  // DAILY JOB
-  // ============================================================
-
-  // Daily job across ALL gyms.
-  //
-  // This is intentionally executed at system level because there
-  // is no request/gymId context.
-  //
-  // This is a legitimate exception to normal request-level
-  // tenant scoping because we explicitly iterate through every gym.
   @Cron(CronExpression.EVERY_DAY_AT_8AM)
   async runDailyForAllGyms() {
+    // Sin RLS, este findMany ve TODOS los gyms. Correcto: iteramos uno por uno.
     const gyms = await this.prisma.gym.findMany({
-      select: {
-        id: true,
-        name: true,
-      },
+      select: { id: true, name: true },
     });
 
     for (const gym of gyms) {
       const reminders = await this.buildForGym(gym.id);
-
-      if (reminders.length === 0) {
-        continue;
-      }
-
+      if (reminders.length === 0) continue;
       this.logger.log(
-        `[${gym.name}] ${reminders.length} membership(s) expiring soon`,
+        `[${gym.name}] ${reminders.length} membresía(s) por vencer`,
       );
+      // Punto de extensión: envío automático vía WhatsApp Cloud API (futuro).
+      /*for (const r of reminders) {
+        if (!r.phone) continue; // sin teléfono, no hay envío
 
-      // ==========================================================
-      // EXTENSION POINT
-      // ==========================================================
-      //
-      // Free/manual model (default):
-      //
-      // The owner opens:
-      //
-      // GET /api/reminders
-      //
-      // and taps each wa.me link manually.
-      //
-      // Cost: $0
-      //
-      // Automated model:
-      //
-      // Loop through `reminders` and send each message through:
-      //
-      // - Twilio
-      // - WhatsApp Cloud API
-      //
-      // That path has a per-message cost.
-      // ==========================================================
+        const to = r.phone.replace(/\D/g, ""); // normalizá igual que el wa.me
+        const fecha = r.endDate.toLocaleDateString("es-VE");
+
+        // "vencimiento_membresia" es tu plantilla aprobada, con 3 variables.
+        const ok = await this.whatsapp.sendTemplate(
+          to,
+          "vencimiento_membresia",
+          [r.memberName, r.plan, fecha], // {{1}}, {{2}}, {{3}}
+        );
+
+        this.logger.log(`${r.memberName}: ${ok ? "enviado" : "omitido/falló"}`);
+      }*/
     }
   }
 }
