@@ -85,6 +85,12 @@ export class AuthService {
     };
   }
 
+  async forgotPassword(email: string) {
+    return {
+      message: "Si el correo está registrado, recibirás instrucciones para restablecer tu contraseña",
+    };
+  }
+
   // =====================================================================
   // REFRESH
   // =====================================================================

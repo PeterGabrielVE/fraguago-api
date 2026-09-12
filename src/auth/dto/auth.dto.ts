@@ -10,6 +10,12 @@ export class LoginDto {
   password!: string;
 }
 
+export class ForgotPasswordDto {
+  @IsEmail()
+  @IsNotEmpty()
+  email!: string;
+}
+
 export class RegisterGymDto {
   @IsString()
   @IsNotEmpty()

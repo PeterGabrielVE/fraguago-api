@@ -9,7 +9,12 @@ import {
 } from "@nestjs/common";
 
 import { AuthService } from "./auth.service";
-import { LoginDto, RegisterGymDto, RefreshDto } from "./dto/auth.dto";
+import {
+  ForgotPasswordDto,
+  LoginDto,
+  RegisterGymDto,
+  RefreshDto,
+} from "./dto/auth.dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Public } from "./decorators/public.decorator";
@@ -50,6 +55,12 @@ export class AuthController {
   @Post("register-gym")
   registerGym(@Body() dto: RegisterGymDto) {
     return this.auth.registerGym(dto);
+  }
+
+  @Public()
+  @Post("forgot-password")
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.auth.forgotPassword(dto.email);
   }
 
   @Public()
