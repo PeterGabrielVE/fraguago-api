@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Put,
   Query,
   UseGuards,
@@ -31,6 +32,16 @@ export class HealthProfilesController {
   @Put()
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   upsert(
+    @GymId() gymId: string,
+    @Query('memberId') memberId: string,
+    @Body() dto: UpsertMedicalProfileDto,
+  ) {
+    return this.service.upsert(gymId, memberId, dto);
+  }
+
+  @Patch()
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  update(
     @GymId() gymId: string,
     @Query('memberId') memberId: string,
     @Body() dto: UpsertMedicalProfileDto,

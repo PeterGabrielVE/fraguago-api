@@ -88,7 +88,7 @@ export class MembersController {
   getEmergencyContact(
     @GymId() gymId: string,
     @Param("id") id: string,
-  ): Promise<EmergencyContactResponseDto> {
+  ): Promise<EmergencyContactResponseDto | null> {
     return this.service.getEmergencyContact(gymId, id);
   }
 

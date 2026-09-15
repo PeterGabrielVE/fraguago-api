@@ -405,15 +405,13 @@ export class MembersService {
   async getEmergencyContact(
     gymId: string,
     memberId: string,
-  ): Promise<EmergencyContactResponseDto> {
+  ): Promise<EmergencyContactResponseDto | null> {
     const contact = await this.prisma.emergencyContact.findFirst({
       where: { memberId, gymId },
     });
 
     if (!contact) {
-      throw new NotFoundException(
-        `No emergency contact found for member ${memberId}`,
-      );
+      return null;
     }
 
     return new EmergencyContactResponseDto(contact);
