@@ -35,6 +35,14 @@ export class CreateMemberDto {
   @IsString()
   phone?: string;
 
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  preferredTime?: string;
+
   // ============================================================
   // MEMBER
   // ============================================================

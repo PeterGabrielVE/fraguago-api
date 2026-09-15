@@ -24,7 +24,13 @@ export class UsersService {
     createdAt: true,
     updatedAt: true,
     profile: {
-      select: { firstName: true, lastName: true, phone: true, address: true },
+      select: {
+        firstName: true,
+        lastName: true,
+        phone: true,
+        address: true,
+        preferredTime: true,
+      },
     },
   } as const;
 
@@ -99,6 +105,7 @@ export class UsersService {
             ...(dto.lastName !== undefined ? { lastName: dto.lastName } : {}),
             ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
             ...(dto.address !== undefined ? { address: dto.address } : {}),
+            ...(dto.preferredTime !== undefined ? { preferredTime: dto.preferredTime } : {}),
           },
         },
       },

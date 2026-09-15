@@ -5,4 +5,5 @@ export class UpdateUserDto {
   @IsOptional() @IsString() lastName?: string;
   @IsOptional() @IsString() phone?: string;
   @IsOptional() @IsString() address?: string;
+  @IsOptional() @IsString() preferredTime?: string;
 }

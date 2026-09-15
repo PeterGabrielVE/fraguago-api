@@ -116,6 +116,8 @@ export class MembersService {
               firstName: dto.firstName,
               lastName: dto.lastName,
               phone: dto.phone,
+              address: dto.address,
+              preferredTime: dto.preferredTime,
               gymId,
             },
           },
@@ -263,6 +265,8 @@ export class MembersService {
       firstName,
       lastName,
       phone,
+      address,
+      preferredTime,
       email,
       birthDate,
       identificationNumber,
@@ -285,11 +289,13 @@ export class MembersService {
       if (
         firstName !== undefined ||
         lastName !== undefined ||
-        phone !== undefined
+        phone !== undefined ||
+        address !== undefined ||
+        preferredTime !== undefined
       ) {
         await tx.profile.update({
           where: { userId: member.userId },
-          data: { firstName, lastName, phone },
+          data: { firstName, lastName, phone, address, preferredTime },
         });
       }
 

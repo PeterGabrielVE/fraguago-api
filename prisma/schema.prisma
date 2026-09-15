@@ -235,6 +235,7 @@ model Profile {
   lastName  String
   phone     String?
   address   String?
+  preferredTime String?
   avatarUrl String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
