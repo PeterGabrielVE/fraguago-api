@@ -32,6 +32,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { UsersModule } from './users/users.module';
 import { GymModule } from './modules/gym/gym.module';
 import { AiModule } from './modules/ai/ai.module';
+import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { AiModule } from './modules/ai/ai.module';
     UsersModule,
     GymModule,
     AiModule,             // AI-powered routine generation
+    ExchangeRatesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user

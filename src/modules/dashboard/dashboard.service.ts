@@ -99,15 +99,15 @@ export class DashboardService {
         this.prisma.transaction.groupBy({
           by: ["type"],
           where: { gymId, date: { gte: startMonth } },
-          _sum: { amount: true },
+          _sum: { amountBase: true },
         }),
       ]);
 
     const income = Number(
-      monthTx.find((t) => t.type === TransactionType.INCOME)?._sum.amount ?? 0,
+      monthTx.find((t) => t.type === TransactionType.INCOME)?._sum.amountBase ?? 0,
     );
     const expense = Number(
-      monthTx.find((t) => t.type === TransactionType.EXPENSE)?._sum.amount ?? 0,
+      monthTx.find((t) => t.type === TransactionType.EXPENSE)?._sum.amountBase ?? 0,
     );
 
     return {
@@ -183,14 +183,14 @@ export class DashboardService {
 
     const rows = await this.prisma.transaction.findMany({
       where: { gymId, type, date: { gte: from } },
-      select: { amount: true, date: true },
+      select: { amountBase: true, date: true },
     });
 
-    const total = rows.reduce((acc, r) => acc + Number(r.amount), 0);
+    const total = rows.reduce((acc, r) => acc + Number(r.amountBase), 0);
     const series = this.bucketByDay(
       rows,
       (r) => r.date,
-      (r) => Number(r.amount),
+      (r) => Number(r.amountBase),
       from,
       to,
     );

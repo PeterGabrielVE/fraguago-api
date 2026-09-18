@@ -2,10 +2,10 @@ import {
   Inject,
   Injectable,
   NotFoundException,
-  ForbiddenException,
+  BadRequestException,
 } from "@nestjs/common";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
-import { AttendanceShift } from "@prisma/client";
+import { AttendanceShift, Prisma } from "@prisma/client";
 
 @Injectable()
 export class AttendanceService {
@@ -34,6 +34,13 @@ export class AttendanceService {
     return d;
   }
 
+  // Medianoche local de una fecha "YYYY-MM-DD" (evita el corrimiento de día
+  // que da `new Date('YYYY-MM-DD')`, que Node interpreta como UTC).
+  private startOfDay(dateStr: string): Date {
+    const [year, month, day] = dateStr.split("-").map(Number);
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  }
+
   // Deriva el turno de la hora real, en vez de fijarlo a MORNING.
   private shiftFromHour(d: Date): AttendanceShift {
     const h = d.getHours();
@@ -60,8 +67,11 @@ export class AttendanceService {
       },
     });
     if (!activeMembership) {
-      throw new ForbiddenException(
-        "El socio no tiene una membresía vigente. No se permite el acceso.",
+      // 400, no 403: esto es una regla de negocio (el socio, no quien marca
+      // la entrada), no un problema de permisos del usuario logueado. Un 403
+      // acá dispara la redirección genérica de "sin permisos" en el frontend.
+      throw new BadRequestException(
+        "El socio no tiene una membresía vigente hoy. No se permite el acceso.",
       );
     }
 
@@ -70,9 +80,24 @@ export class AttendanceService {
     });
   }
 
-  // B01 — GET /attendance (listado general paginado).
-  async findAll(gymId: string, page = 1, pageSize = 20) {
-    const where = { gymId };
+  // B01 — GET /attendance (listado general paginado, opcionalmente filtrado
+  // por fecha exacta y/o turno).
+  async findAll(
+    gymId: string,
+    page = 1,
+    pageSize = 20,
+    date?: string,
+    shift?: AttendanceShift,
+  ) {
+    const where: Prisma.AttendanceWhereInput = { gymId };
+    if (date) {
+      const start = this.startOfDay(date);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      where.checkedInAt = { gte: start, lt: end };
+    }
+    if (shift) where.shift = shift;
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.attendance.findMany({
         where,

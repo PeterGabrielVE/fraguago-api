@@ -15,17 +15,20 @@ export class ReportsService {
 
     const [members, activeMemberships, attendanceToday, monthTx] = await Promise.all([
       this.prisma.member.count({ where: { gymId, status: MemberStatus.ACTIVE } }),
-      this.prisma.membership.count({ where: { gymId, status: MemberStatus.ACTIVE, endDate: { gte: now } } }),
+      // Membership.status es un String ("active"), NO el enum MemberStatus.
+      this.prisma.membership.count({ where: { gymId, status: "active", endDate: { gte: now } } }),
       this.prisma.attendance.count({ where: { gymId, checkedInAt: { gte: startOfDay } } }),
       this.prisma.transaction.groupBy({
         by: ['type'],
         where: { gymId, date: { gte: startOfMonth } },
-        _sum: { amount: true },
+        // amountBase: todo ya convertido a la moneda base del gym; sumar
+        // "amount" crudo mezclaría USD/VES/EUR sin sentido.
+        _sum: { amountBase: true },
       }),
     ]);
 
-    const income = Number(monthTx.find((t) => t.type === 'INCOME')?._sum.amount ?? 0);
-    const expense = Number(monthTx.find((t) => t.type === 'EXPENSE')?._sum.amount ?? 0);
+    const income = Number(monthTx.find((t) => t.type === 'INCOME')?._sum.amountBase ?? 0);
+    const expense = Number(monthTx.find((t) => t.type === 'EXPENSE')?._sum.amountBase ?? 0);
 
     return {
       activeMembers: members,

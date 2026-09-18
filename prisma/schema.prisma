@@ -97,6 +97,12 @@ enum AttendanceShift {
   NIGHT
 }
 
+enum Currency {
+  USD
+  VES
+  EUR
+}
+
 // =====================================================================
 // TENANT / GYM
 // =====================================================================
@@ -104,6 +110,9 @@ enum AttendanceShift {
 model Gym {
   id        String   @id @default(uuid())
   name      String
+  // Moneda de referencia para reportes/totales; los pagos en otra moneda se
+  // convierten a esta usando la tasa vigente al momento del pago.
+  baseCurrency Currency @default(USD)
   createdAt DateTime @default(now())
 
   users    User[]
@@ -133,6 +142,8 @@ model Gym {
 
   emergencyContacts EmergencyContact[]
   medicalProfiles   MedicalProfile[]
+
+  exchangeRates ExchangeRate[]
 
   @@index([name])
 }
@@ -400,6 +411,7 @@ model MembershipPlan {
   name         String
   type         MembershipType
   price        Decimal        @db.Decimal(10, 2)
+  currency     Currency       @default(USD)
   durationDays Int
 
   createdAt DateTime @default(now())
@@ -540,6 +552,13 @@ model Transaction {
   memberId  String?
 
   amount        Decimal        @db.Decimal(10, 2)
+  // Moneda en la que efectivamente se pagó/gastó, y la tasa usada para
+  // convertirlo a la moneda base del gym en ese momento (snapshot, nunca
+  // se recalcula después aunque cambie la tasa). amountBase = amount cuando
+  // currency ya es la moneda base.
+  currency      Currency       @default(USD)
+  exchangeRate  Decimal        @db.Decimal(12, 6) @default(1)
+  amountBase    Decimal        @db.Decimal(10, 2) @default(0)
   paymentMethod PaymentMethod?
   note          String?
   date          DateTime       @default(now())
@@ -559,6 +578,35 @@ model Transaction {
 }
 
 // =====================================================================
+// EXCHANGE RATES
+// =====================================================================
+//
+// Tasa de cambio de una moneda (VES, EUR) respecto a la moneda base del
+// gym, registrada manualmente por el staff (ej. "la tasa BCV de hoy").
+// `rate` = cuántas unidades de `currency` equivalen a 1 unidad de la moneda
+// base (ej. VES: 900 significa "900 Bs = 1 USD"), tal como el staff piensa
+// la tasa del día. Se guarda un historial: cada pago referencia la tasa
+// vigente en ese momento (ver Transaction.exchangeRate), nunca se recalcula.
+// =====================================================================
+
+model ExchangeRate {
+  id    String @id @default(uuid())
+  gymId String
+
+  currency    Currency
+  rate        Decimal  @db.Decimal(12, 6)
+  source      String?
+  effectiveAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([gymId, currency, effectiveAt])
+}
+
+// =====================================================================
 // SERVICES
 // =====================================================================
 
@@ -567,7 +615,8 @@ model Service {
   gymId String
 
   name        String
-  price       Decimal @db.Decimal(10, 2)
+  price       Decimal  @db.Decimal(10, 2)
+  currency    Currency @default(USD)
   description String?
 
   createdAt DateTime @default(now())
@@ -669,10 +718,11 @@ model Product {
   id    String @id @default(uuid())
   gymId String
 
-  name  String
-  price Decimal @db.Decimal(10, 2)
-  stock Int     @default(0)
-  sku   String?
+  name     String
+  price    Decimal  @db.Decimal(10, 2)
+  currency Currency @default(USD)
+  stock    Int      @default(0)
+  sku      String?
 
   createdAt DateTime @default(now())
 

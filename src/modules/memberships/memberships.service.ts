@@ -1,13 +1,16 @@
 // modules/memberships/memberships.service.ts
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { TransactionType } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { PaginationDto } from "src/common/dto/pagination.dto";
 import { paginate } from "src/common/pagination";
+import { FinancesService } from "../finances/finances.service";
 
 @Injectable()
 export class MembershipsService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
+    private readonly financesService: FinancesService,
   ) {}
 
   // única fuente de verdad para la fecha de vencimiento.
@@ -44,10 +47,54 @@ export class MembershipsService {
     if (!plan) throw new NotFoundException("Plan not found");
 
     const start = input.startDate ? new Date(input.startDate) : new Date();
-    return this.prisma.membership.create({
+    const membership = await this.prisma.membership.create({
       data: {
         gymId,
         memberId: input.memberId,
+        planId: plan.id,
+        startDate: start,
+        endDate: this.addDays(start, plan.durationDays),
+      },
+    });
+
+    // Registra el ingreso automáticamente: asignar un plan es venderlo.
+    await this.financesService.create(gymId, {
+      type: TransactionType.INCOME,
+      amount: Number(plan.price),
+      currency: plan.currency,
+      memberId: input.memberId,
+      note: `Pago membresía: ${plan.name}`,
+      date: start.toISOString(),
+    });
+
+    return membership;
+  }
+
+  // Corrige una membresía mal cargada (socio o plan equivocado). A
+  // diferencia de renew(), no genera un nuevo cobro: es un ajuste de datos,
+  // no una venta.
+  async update(
+    gymId: string,
+    id: string,
+    input: { memberId?: string; planId?: string; startDate?: string },
+  ) {
+    const current = await this.prisma.membership.findFirst({
+      where: { id, gymId },
+    });
+    if (!current) throw new NotFoundException("Membership not found");
+
+    const planId = input.planId ?? current.planId;
+    const plan = await this.prisma.membershipPlan.findFirst({
+      where: { id: planId, gymId },
+    });
+    if (!plan) throw new NotFoundException("Plan not found");
+
+    const start = input.startDate ? new Date(input.startDate) : current.startDate;
+
+    return this.prisma.membership.update({
+      where: { id: current.id },
+      data: {
+        memberId: input.memberId ?? current.memberId,
         planId: plan.id,
         startDate: start,
         endDate: this.addDays(start, plan.durationDays),
@@ -116,7 +163,7 @@ export class MembershipsService {
         ? current.endDate
         : now;
 
-    return this.prisma.membership.update({
+    const membership = await this.prisma.membership.update({
       where: { id: current.id },
       data: {
         planId: plan.id,
@@ -125,6 +172,18 @@ export class MembershipsService {
         status: "active",
       },
     });
+
+    // Renovar también es un cobro: registra el ingreso.
+    await this.financesService.create(gymId, {
+      type: TransactionType.INCOME,
+      amount: Number(plan.price),
+      currency: plan.currency,
+      memberId: current.memberId,
+      note: `Renovación membresía: ${plan.name}`,
+      date: base.toISOString(),
+    });
+
+    return membership;
   }
 
   // Piso `gte: now` para no solaparse con las ya vencidas (B05).

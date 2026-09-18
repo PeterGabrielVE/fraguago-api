@@ -1,4 +1,4 @@
-import { MembershipType } from '@prisma/client';
+import { MembershipType, Currency } from '@prisma/client';
 import { IsString, IsNotEmpty, IsOptional, IsNumber, IsInt, IsBoolean, Min, MaxLength, IsEnum } from 'class-validator';
 
 export class CreateMembershipPlanDto {
@@ -19,6 +19,10 @@ export class CreateMembershipPlanDto {
   @IsNumber()
   @Min(0)
   price?: number;
+
+  @IsOptional()
+  @IsEnum(Currency)
+  currency?: Currency;
 
   @IsInt()
   @Min(1)

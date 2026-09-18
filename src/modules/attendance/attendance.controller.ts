@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -12,8 +13,10 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { GymId } from '../../auth/decorators/gym-id.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { AttendanceShift, Role } from '@prisma/client';
 import { CheckInDto } from './dto/check-in.dto';
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 @Controller('attendance')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -22,7 +25,7 @@ export class AttendanceController {
 
 
   @Post('check-in')
-  @Roles(Role.ADMIN, Role.STAFF)
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   checkIn(@GymId() gymId: string, @Body() dto: CheckInDto) {
     return this.service.checkIn(gymId, dto.memberId);
   }
@@ -34,11 +37,24 @@ export class AttendanceController {
     @GymId() gymId: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('date') date?: string,
+    @Query('shift') shift?: AttendanceShift,
   ) {
+    if (date && !DATE_RE.test(date)) {
+      throw new BadRequestException('date debe tener el formato YYYY-MM-DD');
+    }
+    if (shift && !Object.values(AttendanceShift).includes(shift)) {
+      throw new BadRequestException(
+        `shift debe ser uno de: ${Object.values(AttendanceShift).join(', ')}`,
+      );
+    }
+
     return this.service.findAll(
       gymId,
       page ? Number(page) : 1,
       pageSize ? Number(pageSize) : 20,
+      date,
+      shift,
     );
   }
 

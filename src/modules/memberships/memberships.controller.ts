@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -14,6 +15,7 @@ import { GymId } from '../../auth/decorators/gym-id.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { RenewMembershipDto } from './dto/renew-membership.dto';
+import { UpdateMembershipDto } from './dto/update-membership.dto';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 @Controller('memberships')
@@ -69,5 +71,16 @@ export class MembershipsController {
     @Body() dto: RenewMembershipDto,
   ) {
     return this.service.renew(gymId, id, dto);
+  }
+
+  // Corrige socio/plan/fecha mal cargados. No genera un nuevo cobro.
+  @Patch(':id')
+  @Roles(Role.ADMIN, Role.STAFF)
+  update(
+    @GymId() gymId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateMembershipDto,
+  ) {
+    return this.service.update(gymId, id, dto);
   }
 }
