@@ -72,35 +72,52 @@ export class FinancesService {
     });
   }
 
-  // FIN-B02 — listado paginado, con filtro opcional por type.
+  // FIN-B02 / FIN-F06 — listado paginado, con filtros opcionales por type,
+  // conceptId y rango de fechas (mismo patrón que summary()).
   async findAll(
     gymId: string,
     { page = 1, pageSize = 20 }: PaginationDto,
     type?: TransactionType,
+    conceptId?: string,
+    from?: string,
+    to?: string,
   ) {
+    // Ya no pasa por el ValidationPipe de PaginationDto (ver controller), así
+    // que el límite de pageSize se aplica acá a mano.
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.min(100, Math.max(1, pageSize));
+
     const where: Prisma.TransactionWhereInput = {
       gymId,
       ...(type ? { type } : {}),
+      ...(conceptId ? { conceptId } : {}),
     };
+    if (from || to) {
+      where.date = {
+        ...(from ? { gte: new Date(from) } : {}),
+        ...(to ? { lte: new Date(to) } : {}),
+      };
+    }
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.transaction.findMany({
         where,
         orderBy: { date: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        skip: (safePage - 1) * safePageSize,
+        take: safePageSize,
+        include: { concept: true },
       }),
       this.prisma.transaction.count({ where }),
     ]);
 
     return {
       data,
-      meta: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
+      meta: { total, page: safePage, pageSize: safePageSize, totalPages: Math.ceil(total / safePageSize) },
     };
   }
 
   async findOne(gymId: string, id: string) {
-    const tx = await this.prisma.transaction.findFirst({ where: { id, gymId } });
+    const tx = await this.prisma.transaction.findFirst({ where: { id, gymId }, include: { concept: true } });
     if (!tx) throw new NotFoundException('Transaction not found');
     return tx;
   }

@@ -17,7 +17,6 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { GymId } from '../../auth/decorators/gym-id.decorator';
-import { PaginationDto } from '../../common/dto/pagination.dto';
 
 @Controller('transactions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -31,15 +30,30 @@ export class FinancesController {
     return this.service.create(gymId, dto);
   }
 
-  // FIN-B02 — listado paginado con filtro opcional ?type=INCOME|EXPENSE
+  // FIN-B02 / FIN-F06 — listado paginado con filtros opcionales:
+  // ?type=INCOME|EXPENSE, ?conceptId=, ?from=, ?to= (fechas ISO).
+  // Nota: no se usa `@Query() pagination: PaginationDto` (bindea TODO el
+  // query string) porque el ValidationPipe global tiene forbidNonWhitelisted,
+  // y rechazaría type/conceptId/from/to por no estar en PaginationDto.
   @Get()
   @Roles(Role.OWNER, Role.ADMIN, Role.STAFF)
   findAll(
     @GymId() gymId: string,
-    @Query() pagination: PaginationDto,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
     @Query('type') type?: TransactionType,
+    @Query('conceptId') conceptId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.service.findAll(gymId, pagination, type);
+    return this.service.findAll(
+      gymId,
+      { page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined },
+      type,
+      conceptId,
+      from,
+      to,
+    );
   }
 
   // FIN-B07 — income vs expense vs balance (solo owner/admin)

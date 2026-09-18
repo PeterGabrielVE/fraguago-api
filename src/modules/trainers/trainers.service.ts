@@ -61,7 +61,7 @@ export class TrainersService {
       });
 
       return tx.trainer.create({
-        data: { gymId, userId: dto.userId!, specialty: dto.specialty },
+        data: { gymId, userId: dto.userId!, specialty: dto.specialty, identificationNumber: dto.identificationNumber },
         include: this.userInclude,
       });
     });
@@ -104,7 +104,7 @@ export class TrainersService {
       });
 
       return tx.trainer.create({
-        data: { gymId, userId: user.id, specialty: dto.specialty },
+        data: { gymId, userId: user.id, specialty: dto.specialty, identificationNumber: dto.identificationNumber },
         include: this.userInclude,
       });
     });
@@ -141,8 +141,36 @@ export class TrainersService {
 
   // TRAIN-B04
   async update(gymId: string, id: string, dto: UpdateTrainerDto) {
-    await this.findOne(gymId, id);
-    return this.prisma.trainer.update({ where: { id }, data: dto });
+    const trainer = await this.findOne(gymId, id);
+    const { firstName, lastName, email, specialty, identificationNumber } = dto;
+
+    if (email) {
+      const existing = await this.prisma.user.findFirst({
+        where: { gymId, email, NOT: { id: trainer.userId } },
+      });
+      if (existing) {
+        throw new ConflictException('Ya existe un usuario con ese email en este gimnasio');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      if (email) {
+        await tx.user.update({ where: { id: trainer.userId }, data: { email } });
+      }
+
+      if (firstName !== undefined || lastName !== undefined) {
+        await tx.profile.update({
+          where: { userId: trainer.userId },
+          data: { firstName, lastName },
+        });
+      }
+
+      return tx.trainer.update({
+        where: { id },
+        data: { specialty, identificationNumber },
+        include: this.userInclude,
+      });
+    });
   }
 
   // TRAIN-B05

@@ -468,7 +468,8 @@ model Trainer {
   gymId  String
   userId String @unique
 
-  specialty String?
+  specialty             String?
+  identificationNumber  String?
 
   createdAt DateTime @default(now())
 

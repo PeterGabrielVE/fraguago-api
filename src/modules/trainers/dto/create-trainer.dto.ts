@@ -34,4 +34,8 @@ export class CreateTrainerDto {
   @IsOptional()
   @IsString()
   specialty?: string;
+
+  @IsOptional()
+  @IsString()
+  identificationNumber?: string;
 }
