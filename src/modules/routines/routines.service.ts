@@ -1,14 +1,22 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateRoutineDto } from './dto/create-routine.dto';
 import { UpdateRoutineDto } from './dto/update-routine.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { ChallengesService, ROUTINE_METRICS } from '../challenges/challenges.service';
 
 @Injectable()
 export class RoutinesService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
+    private readonly challenges: ChallengesService,
   ) {}
+
+  private startOfToday(): Date {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
 
   // Datos legibles del socio y del entrenador para los listados.
   private readonly relationsInclude = {
@@ -123,5 +131,38 @@ export class RoutinesService {
   async remove(gymId: string, id: string) {
     await this.findOne(gymId, id);
     return this.prisma.routine.delete({ where: { id } });
+  }
+
+  // COM-B03 — el socio marca una de SUS rutinas como completada (máx. una vez
+  // por día por rutina) y se actualiza el progreso de sus retos de rutinas.
+  async logCompletion(gymId: string, memberId: string, routineId: string) {
+    const routine = await this.prisma.routine.findFirst({
+      where: { id: routineId, gymId, memberId },
+      select: { id: true },
+    });
+    if (!routine) throw new NotFoundException('Rutina no encontrada');
+
+    const alreadyToday = await this.prisma.routineLog.findFirst({
+      where: { gymId, memberId, routineId, completedAt: { gte: this.startOfToday() } },
+      select: { id: true },
+    });
+    if (alreadyToday) {
+      throw new ConflictException('Ya registraste esta rutina hoy');
+    }
+
+    const log = await this.prisma.routineLog.create({
+      data: { gymId, memberId, routineId },
+    });
+    const challenges = await this.challenges.onActivity(gymId, memberId, ROUTINE_METRICS);
+    return { ...log, challenges };
+  }
+
+  // Ids de las rutinas del socio ya completadas hoy (para el portal).
+  async completedToday(gymId: string, memberId: string): Promise<Set<string>> {
+    const logs = await this.prisma.routineLog.findMany({
+      where: { gymId, memberId, completedAt: { gte: this.startOfToday() } },
+      select: { routineId: true },
+    });
+    return new Set(logs.map((l) => l.routineId));
   }
 }

@@ -7,6 +7,8 @@ import { RoutinesService } from '../modules/routines/routines.service';
 import { ProgressService } from '../modules/progress/progress.service';
 import { GamificationService } from '../modules/gamification/gamification.service';
 import { RewardsService } from '../modules/gamification/rewards.service';
+import { ChallengesService } from '../modules/challenges/challenges.service';
+import { ChallengeStatus } from '../modules/challenges/dto/list-challenges-query.dto';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -25,6 +27,7 @@ export class PortalService {
     private readonly progressService: ProgressService,
     private readonly gamificationService: GamificationService,
     private readonly rewardsService: RewardsService,
+    private readonly challengesService: ChallengesService,
   ) {}
 
   // Resuelve el Member vinculado al User autenticado. Protege contra un
@@ -67,9 +70,19 @@ export class PortalService {
 
   // RoutinesService.findByMember (ROUT-B06) ya existía pero no estaba
   // expuesto por ningún controller; se expone acá por primera vez.
+  // completedToday indica si el socio ya la marcó como hecha hoy (COM-B03).
   async getRoutine(gymId: string, userId: string) {
     const memberId = await this.resolveMemberId(gymId, userId);
-    return this.routinesService.findByMember(gymId, memberId);
+    const [routines, doneToday] = await Promise.all([
+      this.routinesService.findByMember(gymId, memberId),
+      this.routinesService.completedToday(gymId, memberId),
+    ]);
+    return routines.map((r) => ({ ...r, completedToday: doneToday.has(r.id) }));
+  }
+
+  async completeRoutine(gymId: string, userId: string, routineId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.routinesService.logCompletion(gymId, memberId, routineId);
   }
 
   async getProgress(gymId: string, userId: string, pagination: PaginationDto) {
@@ -117,5 +130,42 @@ export class PortalService {
   async getRedemptions(gymId: string, userId: string) {
     const memberId = await this.resolveMemberId(gymId, userId);
     return this.rewardsService.memberRedemptions(gymId, memberId);
+  }
+
+  // --- Retos (COM-B02 / COM-F01 / COM-F02) ---
+
+  async getChallenges(gymId: string, userId: string, status?: ChallengeStatus) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.challengesService.listForMember(gymId, memberId, status);
+  }
+
+  async getChallenge(gymId: string, userId: string, challengeId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.challengesService.findForMember(gymId, challengeId, memberId);
+  }
+
+  async joinChallenge(gymId: string, userId: string, challengeId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.challengesService.join(gymId, challengeId, memberId);
+  }
+
+  async leaveChallenge(gymId: string, userId: string, challengeId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.challengesService.leave(gymId, challengeId, memberId);
+  }
+
+  // Entre socios los nombres van abreviados (nombre + inicial) por privacidad.
+  async getChallengeLeaderboard(gymId: string, userId: string, challengeId: string, limit?: number) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.challengesService.leaderboard(gymId, challengeId, {
+      limit,
+      viewerMemberId: memberId,
+      anonymize: true,
+      visibleOnly: true,
+    });
+  }
+
+  assertChallengeStreamable(gymId: string, challengeId: string) {
+    return this.challengesService.assertStreamable(gymId, challengeId, true);
   }
 }

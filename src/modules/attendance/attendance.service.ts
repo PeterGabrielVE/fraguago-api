@@ -7,12 +7,14 @@ import {
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { AttendanceShift, Prisma } from "@prisma/client";
 import { GamificationService } from "../gamification/gamification.service";
+import { ATTENDANCE_METRICS, ChallengesService } from "../challenges/challenges.service";
 
 @Injectable()
 export class AttendanceService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
     private readonly gamification: GamificationService,
+    private readonly challenges: ChallengesService,
   ) {}
 
   // Bloque de datos del socio reutilizado en los listados.
@@ -84,7 +86,9 @@ export class AttendanceService {
     // GAM-B02 — puntos por asistencia + insignias desbloqueadas. Nunca rompe
     // el check-in (onCheckIn captura sus propios errores).
     const gamification = await this.gamification.onCheckIn(gymId, memberId, attendance.id);
-    return { ...attendance, gamification };
+    // COM-B03 — progreso de retos de asistencia en curso (tampoco rompe).
+    const challenges = await this.challenges.onActivity(gymId, memberId, ATTENDANCE_METRICS);
+    return { ...attendance, gamification, challenges };
   }
 
   // B01 — GET /attendance (listado general paginado, opcionalmente filtrado

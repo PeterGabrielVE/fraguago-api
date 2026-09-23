@@ -110,6 +110,14 @@ enum PointsSource {
   BADGE // bono por desbloquear una insignia
   REDEMPTION // canje de recompensa (negativo)
   REDEMPTION_REFUND // devolución por canje cancelado
+  CHALLENGE // premio por completar un reto
+}
+
+// Qué mide el progreso de un reto (siempre dentro de su ventana de fechas).
+enum ChallengeMetric {
+  ATTENDANCE_COUNT    // check-ins totales
+  ATTENDANCE_DAYS     // días distintos con asistencia
+  ROUTINE_COMPLETIONS // rutinas marcadas como completadas
 }
 
 // Regla con la que se desbloquea automáticamente una insignia.
@@ -181,6 +189,10 @@ model Gym {
   memberBadges       MemberBadge[]
   rewards            Reward[]
   rewardRedemptions  RewardRedemption[]
+
+  challenges            Challenge[]
+  challengeParticipants ChallengeParticipant[]
+  routineLogs           RoutineLog[]
 
   @@index([name])
 }
@@ -352,6 +364,9 @@ model Member {
   pointsTransactions PointsTransaction[]
   badges             MemberBadge[]
   rewardRedemptions  RewardRedemption[]
+
+  challengeParticipations ChallengeParticipant[]
+  routineLogs             RoutineLog[]
 
   @@unique([gymId, identificationNumber])
   @@index([gymId])
@@ -547,6 +562,8 @@ model Routine {
   gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
   member  Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   trainer Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
+
+  logs RoutineLog[]
 
   @@index([gymId])
   @@index([memberId])
@@ -1044,4 +1061,86 @@ model RewardRedemption {
   @@index([memberId])
   @@index([rewardId])
   @@index([gymId, status])
+}
+
+
+// =====================================================================
+// COMMUNITY — ROUTINE LOGS
+// =====================================================================
+//
+// Registro de "rutina completada" por el socio. Alimenta los retos de tipo
+// ROUTINE_COMPLETIONS. Máximo una por rutina por día (validado en servicio).
+// =====================================================================
+
+model RoutineLog {
+  id        String @id @default(uuid())
+  gymId     String
+  memberId  String
+  routineId String
+
+  completedAt DateTime @default(now())
+
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  routine Routine @relation(fields: [routineId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([gymId, memberId, completedAt])
+  @@index([routineId])
+}
+
+// =====================================================================
+// COMMUNITY — CHALLENGES (retos temporales)
+// =====================================================================
+//
+// Reto con ventana [startsAt, endsAt). El progreso de cada participante se
+// RECALCULA desde los datos fuente (asistencias / rutinas) dentro de esa
+// ventana, así nunca se desincroniza. Al llegar a `goal` se marca
+// completedAt (una sola vez) y se acreditan `pointsReward` puntos.
+// =====================================================================
+
+model Challenge {
+  id    String @id @default(uuid())
+  gymId String
+
+  name            String
+  description     String?
+  metric          ChallengeMetric
+  goal            Int
+  startsAt        DateTime
+  endsAt          DateTime
+  pointsReward    Int             @default(0)
+  maxParticipants Int?            // null = sin cupo
+  active          Boolean         @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gym          Gym                    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  participants ChallengeParticipant[]
+
+  @@index([gymId])
+  @@index([gymId, active, startsAt, endsAt])
+}
+
+model ChallengeParticipant {
+  id          String @id @default(uuid())
+  gymId       String
+  challengeId String
+  memberId    String
+
+  progress    Int       @default(0)
+  completedAt DateTime? // primera vez que alcanzó la meta
+  joinedAt    DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  gym       Gym       @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, memberId])
+  @@index([gymId])
+  @@index([memberId])
+  @@index([challengeId, progress])
 }
