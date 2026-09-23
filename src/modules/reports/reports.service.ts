@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { MemberStatus } from "@prisma/client";
+import { MemberStatus, MembershipStatus } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from 'src/prisma/prisma.service';
 
 @Injectable()
@@ -16,7 +16,7 @@ export class ReportsService {
     const [members, activeMemberships, attendanceToday, monthTx] = await Promise.all([
       this.prisma.member.count({ where: { gymId, status: MemberStatus.ACTIVE } }),
       // Membership.status es un String ("active"), NO el enum MemberStatus.
-      this.prisma.membership.count({ where: { gymId, status: "active", endDate: { gte: now } } }),
+      this.prisma.membership.count({ where: { gymId, status: MembershipStatus.ACTIVE, endDate: { gte: now } } }),
       this.prisma.attendance.count({ where: { gymId, checkedInAt: { gte: startOfDay } } }),
       this.prisma.transaction.groupBy({
         by: ['type'],

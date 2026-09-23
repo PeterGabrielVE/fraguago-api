@@ -1,15 +1,22 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateRoutineDto } from './dto/create-routine.dto';
 import { UpdateRoutineDto } from './dto/update-routine.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { ChallengesService, ROUTINE_METRICS } from '../challenges/challenges.service';
+import { ExercisesService } from './exercises.service';
+
+// Ejercicios por día y, dentro del día, por orden (fuera del objeto 'as const'
+// porque Prisma exige un array mutable).
+const EXERCISE_ORDER: Prisma.RoutineExerciseOrderByWithRelationInput[] = [{ day: 'asc' }, { order: 'asc' }];
 
 @Injectable()
 export class RoutinesService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
     private readonly challenges: ChallengesService,
+    private readonly exercisesService: ExercisesService,
   ) {}
 
   private startOfToday(): Date {
@@ -36,6 +43,20 @@ export class RoutinesService {
         },
       },
     },
+    // DB-06 — ejercicios por día y en orden.
+    exercises: {
+      orderBy: EXERCISE_ORDER,
+      select: {
+        id: true,
+        day: true,
+        order: true,
+        sets: true,
+        reps: true,
+        restSeconds: true,
+        notes: true,
+        exercise: { select: { id: true, name: true, muscleGroup: true, equipment: true } },
+      },
+    },
   } as const;
 
   // ROUT-B02 — crea la rutina validando socio (y entrenador si viene).
@@ -56,15 +77,23 @@ export class RoutinesService {
       }
     }
 
-    return this.prisma.routine.create({
-      data: {
-        gymId,
-        memberId: dto.memberId,
-        trainerId: dto.trainerId,
-        name: dto.name,
-        description: dto.description,
-      },
+    // Rutina + ejercicios: todo o nada.
+    const routine = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.routine.create({
+        data: {
+          gymId,
+          memberId: dto.memberId,
+          trainerId: dto.trainerId,
+          name: dto.name,
+          description: dto.description,
+        },
+      });
+      if (dto.exercises?.length) {
+        await this.exercisesService.resolveRoutineExercises(tx, gymId, created.id, dto.exercises);
+      }
+      return created;
     });
+    return this.findOne(gymId, routine.id);
   }
 
   // ROUT-B01 — listado general paginado.
@@ -124,7 +153,15 @@ export class RoutinesService {
       }
     }
 
-    return this.prisma.routine.update({ where: { id }, data: dto });
+    const { exercises, ...data } = dto;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.routine.update({ where: { id }, data });
+      if (exercises) {
+        await tx.routineExercise.deleteMany({ where: { gymId, routineId: id } });
+        await this.exercisesService.resolveRoutineExercises(tx, gymId, id, exercises);
+      }
+    });
+    return this.findOne(gymId, id);
   }
 
   // ROUT-B05

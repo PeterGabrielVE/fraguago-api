@@ -11,7 +11,7 @@ import { PasswordService } from "../../auth/password.service";
 
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
-import { MemberStatus } from "@prisma/client";
+import { MemberStatus, MembershipStatus } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
@@ -134,6 +134,7 @@ export class MembersService {
           preferredShift: dto.preferredShift,
           primaryGoal: dto.primaryGoal,
           goalDescription: dto.goalDescription,
+          externalId: dto.externalId,
         },
         include: {
           user: {
@@ -339,7 +340,7 @@ export class MembersService {
     const member = await this.findOne(gymId, id);
 
     const membership = await this.prisma.membership.findFirst({
-      where: { gymId, memberId: id, status: "active" },
+      where: { gymId, memberId: id, status: MembershipStatus.ACTIVE },
       orderBy: { endDate: "desc" },
       include: { plan: { select: { name: true } } },
     });

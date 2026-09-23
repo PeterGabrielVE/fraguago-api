@@ -1,5 +1,5 @@
 import {
-  CallHandler, ExecutionContext, HttpException, Injectable, Logger, NestInterceptor,
+  CallHandler, ExecutionContext, HttpException, Injectable, Logger, NestInterceptor, SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Observable, tap } from 'rxjs';
@@ -15,6 +15,8 @@ const SENSITIVE = ['password', 'passwordhash', 'token', 'secret', 'authorization
 // @AuditAs({ entity, action }) para sobrescribir los valores adivinados.
 export const AUDIT_SKIP = 'audit:skip';
 export const AUDIT_AS = 'audit:as';
+export const AuditSkip = () => SetMetadata(AUDIT_SKIP, true);
+export const AuditAs = (meta: { entity?: string; action?: string }) => SetMetadata(AUDIT_AS, meta);
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {

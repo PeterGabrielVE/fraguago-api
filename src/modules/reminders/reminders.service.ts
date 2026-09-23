@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { MembershipStatus } from "@prisma/client";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { WhatsappService } from "./whatsapp.service";
 import { SystemPrismaService } from "src/prisma/system-prisma.service";
@@ -44,7 +45,7 @@ export class RemindersService {
     const memberships = await this.prisma.membership.findMany({
       where: {
         gymId, // obligatorio: la base NO filtra por vos con este cliente
-        status: "active",
+        status: MembershipStatus.ACTIVE,
         endDate: { lte: limit, gte: new Date() }, // vence pronto, aún no vencida
       },
       orderBy: { endDate: "asc" },

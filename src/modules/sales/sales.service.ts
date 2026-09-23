@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { Prisma, TransactionType } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
+import { FinancesService } from "../finances/finances.service";
 import { CreateSaleDto } from "./dto/create-sale.dto";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 
@@ -13,9 +14,14 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 export class SalesService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
+    private readonly finances: FinancesService,
   ) {}
 
   private readonly saleInclude = {
+    createdBy: {
+      select: { id: true, email: true, profile: { select: { firstName: true, lastName: true } } },
+    },
+    transaction: { select: { id: true, amountBase: true, currency: true, exchangeRate: true } },
     items: {
       include: { product: { select: { id: true, name: true, sku: true } } },
     },
@@ -78,6 +84,16 @@ export class SalesService {
       new Prisma.Decimal(0),
     );
 
+    // DB-05 — el total se registra en Finanzas en UNA moneda: sumar precios
+    // en USD y en Bs daría un número sin sentido.
+    const currencies = new Set(products.map((p) => p.currency));
+    if (currencies.size > 1) {
+      throw new BadRequestException(
+        `No se pueden mezclar productos en distintas monedas (${[...currencies].join(", ")}) en una misma venta`,
+      );
+    }
+    const [currency] = [...currencies];
+
     // TODO junto o nada: venta + items + descuento de stock + movimientos + ingreso.
     return this.prisma.$transaction(async (tx) => {
       const sale = await tx.sale.create({
@@ -85,6 +101,8 @@ export class SalesService {
           gymId,
           memberId: dto.memberId,
           total,
+          currency,
+          paymentMethod: dto.paymentMethod,
           createdById: userId,
           items: {
             create: items.map((it) => ({
@@ -116,18 +134,22 @@ export class SalesService {
         });
       }
 
-      await tx.transaction.create({
-        data: {
-          gymId,
+      // DB-05 — ingreso vinculado a la venta (saleId único) y con la moneda
+      // convertida a la base del gym (antes quedaba amountBase = 0).
+      const income = await this.finances.create(
+        gymId,
+        {
           type: TransactionType.INCOME,
-          amount: total,
+          amount: total.toNumber(),
+          currency,
           memberId: dto.memberId,
           note: `Venta POS ${sale.id}`,
-          createdById: userId,
         },
-      });
+        tx,
+        { saleId: sale.id, createdById: userId, paymentMethod: dto.paymentMethod },
+      );
 
-      return sale;
+      return { ...sale, transaction: { id: income.id, amountBase: income.amountBase, currency: income.currency, exchangeRate: income.exchangeRate } };
     });
   }
 

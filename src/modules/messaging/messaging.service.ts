@@ -71,6 +71,11 @@ export class MessagingService {
     if (msg.channel === 'EMAIL') {
       const to = msg.email?.trim();
       if (!to) return { status: 'SKIPPED', recipient: '—', error: 'El socio no tiene email' };
+      // Emails provisionales de socios importados sin correo (dominio .invalid,
+      // RFC 2606): nunca se envían.
+      if (to.toLowerCase().endsWith('.invalid')) {
+        return { status: 'SKIPPED', recipient: to, error: 'Email provisional: el socio no tiene correo real' };
+      }
       if (!this.email.isConfigured) {
         return { status: 'SKIPPED', recipient: to, error: 'Email no configurado en el servidor' };
       }

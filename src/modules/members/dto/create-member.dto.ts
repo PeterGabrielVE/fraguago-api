@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
 } from "class-validator";
 
@@ -69,4 +70,10 @@ export class CreateMemberDto {
   @IsOptional()
   @IsString()
   goalDescription?: string;
+
+  // ID del socio en el sistema anterior (importaciones, MIG-B02).
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  externalId?: string;
 }

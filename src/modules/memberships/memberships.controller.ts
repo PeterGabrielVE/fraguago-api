@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -16,6 +17,7 @@ import { Roles } from '../../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { RenewMembershipDto } from './dto/renew-membership.dto';
 import { UpdateMembershipDto } from './dto/update-membership.dto';
+import { UpdateMembershipStatusDto } from './dto/update-membership-status.dto';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 @Controller('memberships')
@@ -74,6 +76,17 @@ export class MembershipsController {
   }
 
   // Corrige socio/plan/fecha mal cargados. No genera un nuevo cobro.
+  // DB-02 — suspender / reactivar / cancelar (ruta más específica antes de :id).
+  @Patch(':id/status')
+  @Roles(Role.ADMIN, Role.STAFF)
+  changeStatus(
+    @GymId() gymId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMembershipStatusDto,
+  ) {
+    return this.service.changeStatus(gymId, id, dto.status);
+  }
+
   @Patch(':id')
   @Roles(Role.ADMIN, Role.STAFF)
   update(

@@ -1,6 +1,6 @@
 // modules/memberships/memberships.service.ts
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { TransactionType } from "@prisma/client";
+import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { TransactionType, MembershipStatus } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { PaginationDto } from "src/common/dto/pagination.dto";
 import { paginate } from "src/common/pagination";
@@ -74,6 +74,28 @@ export class MembershipsService {
     await this.referralsService.onMembershipCreated(gymId, input.memberId);
 
     return membership;
+  }
+
+  // DB-02 — transiciones permitidas del estado administrativo. CANCELLED es
+  // final (una membresía anulada no se revive: se asigna una nueva).
+  private static readonly STATUS_TRANSITIONS: Record<MembershipStatus, MembershipStatus[]> = {
+    ACTIVE: [MembershipStatus.SUSPENDED, MembershipStatus.CANCELLED],
+    SUSPENDED: [MembershipStatus.ACTIVE, MembershipStatus.CANCELLED],
+    CANCELLED: [],
+  };
+
+  async changeStatus(gymId: string, id: string, status: MembershipStatus) {
+    const current = await this.prisma.membership.findFirst({ where: { id, gymId } });
+    if (!current) throw new NotFoundException("Membresía no encontrada");
+    if (current.status === status) return current;
+    if (!MembershipsService.STATUS_TRANSITIONS[current.status].includes(status)) {
+      throw new BadRequestException(
+        current.status === MembershipStatus.CANCELLED
+          ? "Una membresía cancelada no se puede reactivar: asigna una nueva"
+          : `No se puede pasar de ${current.status} a ${status}`,
+      );
+    }
+    return this.prisma.membership.update({ where: { id }, data: { status } });
   }
 
   // Corrige una membresía mal cargada (socio o plan equivocado). A
@@ -175,7 +197,7 @@ export class MembershipsService {
         planId: plan.id,
         startDate: base,
         endDate: this.addDays(base, plan.durationDays),
-        status: "active",
+        status: MembershipStatus.ACTIVE,
       },
     });
 
@@ -204,7 +226,7 @@ export class MembershipsService {
 
     const where = {
       gymId,
-      status: "active",
+      status: MembershipStatus.ACTIVE,
       endDate: { gte: now, lte: limit },
     };
 

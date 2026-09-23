@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
-import { AttendanceShift, Prisma } from "@prisma/client";
+import { AttendanceShift, Prisma, MembershipStatus } from "@prisma/client";
 import { GamificationService } from "../gamification/gamification.service";
 import { ATTENDANCE_METRICS, ChallengesService } from "../challenges/challenges.service";
 
@@ -65,7 +65,7 @@ export class AttendanceService {
       where: {
         gymId,
         memberId,
-        status: "active",
+        status: MembershipStatus.ACTIVE,
         startDate: { lte: now },
         endDate: { gte: now },
       },

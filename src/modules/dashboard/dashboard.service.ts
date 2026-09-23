@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { MemberStatus, TransactionType } from "@prisma/client";
+import { MemberStatus, TransactionType, MembershipStatus } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from "src/prisma/prisma.service";
 
 @Injectable()
@@ -91,7 +91,7 @@ export class DashboardService {
         }),
         // FIX: Membership.status es String "active", NO el enum MemberStatus.
         this.prisma.membership.count({
-          where: { gymId, status: "active", endDate: { gte: now } },
+          where: { gymId, status: MembershipStatus.ACTIVE, endDate: { gte: now } },
         }),
         this.prisma.attendance.count({
           where: { gymId, checkedInAt: { gte: startDay } },
@@ -217,17 +217,17 @@ export class DashboardService {
 
     const [active, expired, expiringSoon, byPlan] = await Promise.all([
       this.prisma.membership.count({
-        where: { gymId, status: "active", endDate: { gte: now } },
+        where: { gymId, status: MembershipStatus.ACTIVE, endDate: { gte: now } },
       }),
       this.prisma.membership.count({
         where: { gymId, endDate: { lt: now } },
       }),
       this.prisma.membership.count({
-        where: { gymId, status: "active", endDate: { gte: now, lte: in7 } },
+        where: { gymId, status: MembershipStatus.ACTIVE, endDate: { gte: now, lte: in7 } },
       }),
       this.prisma.membership.groupBy({
         by: ["planId"],
-        where: { gymId, status: "active", endDate: { gte: now } },
+        where: { gymId, status: MembershipStatus.ACTIVE, endDate: { gte: now } },
         _count: { _all: true },
       }),
     ]);

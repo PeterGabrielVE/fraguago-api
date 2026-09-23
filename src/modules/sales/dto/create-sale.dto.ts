@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
+import { PaymentMethod } from '@prisma/client';
 import {
   ArrayMinSize,
   IsArray,
+  IsEnum,
   IsInt,
   IsOptional,
   IsUUID,
@@ -28,4 +30,9 @@ export class CreateSaleDto {
   @ValidateNested({ each: true })
   @Type(() => SaleItemDto)
   items!: SaleItemDto[];
+
+  // DB-03 — efectivo, tarjeta, transferencia u otro.
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 }

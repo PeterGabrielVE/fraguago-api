@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AutomatedMessage, AutomationTrigger, MessageChannel, Prisma } from '@prisma/client';
+import { AutomatedMessage, AutomationTrigger, MessageChannel, Prisma, MembershipStatus } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { MessagingService } from '../messaging/messaging.service';
 import { TemplateValues, renderTemplate, unknownVariables } from '../messaging/template';
@@ -183,7 +183,7 @@ export class AutomationsService {
       select: { checkedInAt: true },
     },
     memberships: {
-      where: { status: 'active', startDate: { lte: now }, endDate: { gte: now } },
+      where: { status: MembershipStatus.ACTIVE, startDate: { lte: now }, endDate: { gte: now } },
       orderBy: { endDate: 'desc' as const },
       take: 1,
       select: { endDate: true, plan: { select: { name: true } } },
@@ -199,7 +199,7 @@ export class AutomationsService {
         gymId,
         status: 'ACTIVE',
         joinedAt: { lte: cutoff },
-        memberships: { some: { gymId, status: 'active', startDate: { lte: now }, endDate: { gte: now } } },
+        memberships: { some: { gymId, status: MembershipStatus.ACTIVE, startDate: { lte: now }, endDate: { gte: now } } },
         attendances: { none: { checkedInAt: { gte: cutoff } } },
       },
       select: this.memberSelect(now),
@@ -231,7 +231,7 @@ export class AutomationsService {
       where: {
         gymId,
         status: 'ACTIVE',
-        memberships: { some: { gymId, status: 'active', startDate: { lte: now }, endDate: { gte: now, lte: limit } } },
+        memberships: { some: { gymId, status: MembershipStatus.ACTIVE, startDate: { lte: now }, endDate: { gte: now, lte: limit } } },
       },
       select: this.memberSelect(now),
       take: MAX_TARGETS_PER_RUN,

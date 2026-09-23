@@ -84,6 +84,15 @@ enum MembershipType {
   ANNUAL
 }
 
+// Estado ADMINISTRATIVO de una membresía. "Vencida", "por vencer" y "por
+// iniciar" NO se guardan: se derivan de startDate/endDate (así nunca quedan
+// desactualizados sin un cron).
+enum MembershipStatus {
+  ACTIVE    // vigente según sus fechas
+  SUSPENDED // congelada por el staff (lesión, viaje…): no permite check-in
+  CANCELLED // anulada: no cuenta como membresía
+}
+
 enum PaymentMethod {
   CASH
   CARD
@@ -135,6 +144,18 @@ enum MessageStatus {
 enum ReferralStatus {
   PENDING  // registrado; el referido todavía no tiene membresía
   REWARDED // el referido activó su primera membresía y se pagó el premio
+}
+
+// Qué se importa desde Excel/CSV (MIG-B01).
+enum ImportType {
+  MEMBERS_PAYMENTS // socios + último pago (hoja "Control de Pagos")
+  ATTENDANCE       // cuadrícula de asistencia diaria (Día 1..31)
+}
+
+enum ImportStatus {
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 // Qué mide el progreso de un reto (siempre dentro de su ventana de fechas).
@@ -222,6 +243,11 @@ model Gym {
   messageLogs       MessageLog[]
   referrals         Referral[]
 
+  importJobs ImportJob[]
+
+  exercises        Exercise[]
+  routineExercises RoutineExercise[]
+
   @@index([name])
 }
 
@@ -254,6 +280,7 @@ model User {
   trainer   Trainer?
   auditLogs AuditLog[]
   refreshTokens RefreshToken[]
+  salesCreated  Sale[] @relation("SaleCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -376,6 +403,11 @@ model Member {
   // Se genera la primera vez que el socio lo consulta.
   referralCode String?
 
+  // Identificador del socio en el sistema anterior (p. ej. el "ID" 001 de la
+  // planilla de Excel). Evita duplicados al reimportar y permite cruzar la
+  // hoja de asistencia. Único por gym.
+  externalId String?
+
   joinedAt  DateTime @default(now())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -406,6 +438,7 @@ model Member {
 
   @@unique([gymId, identificationNumber])
   @@unique([gymId, referralCode])
+  @@unique([gymId, externalId])
   @@index([gymId])
   @@index([userId])
 }
@@ -534,9 +567,9 @@ model Membership {
   memberId String
   planId   String
 
-  startDate DateTime @default(now())
+  startDate DateTime         @default(now())
   endDate   DateTime
-  status    String   @default("active")
+  status    MembershipStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -600,7 +633,8 @@ model Routine {
   member  Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   trainer Trainer? @relation(fields: [trainerId], references: [id], onDelete: SetNull)
 
-  logs RoutineLog[]
+  logs      RoutineLog[]
+  exercises RoutineExercise[]
 
   @@index([gymId])
   @@index([memberId])
@@ -664,6 +698,9 @@ model Transaction {
   note          String?
   date          DateTime       @default(now())
 
+  // DB-05 — venta POS que originó este ingreso (null = movimiento manual).
+  saleId String? @unique
+
   createdById String?
 
   createdAt DateTime @default(now())
@@ -671,6 +708,7 @@ model Transaction {
   gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
   concept Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
   member  Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  sale    Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
   @@index([gymId])
   @@index([gymId, type])
@@ -845,18 +883,25 @@ model Sale {
   memberId String?  // opcional: venta a un socio o a público general
 
   total Decimal @db.Decimal(10, 2) // suma de todos los items
+  // Moneda de `total` (la de los productos: una venta no mezcla monedas).
+  currency      Currency       @default(USD)
+  paymentMethod PaymentMethod?
 
   createdById String?  // user que registró la venta
   soldAt      DateTime @default(now())
   createdAt   DateTime @default(now())
 
-  gym    Gym        @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  member Member?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
-  items  SaleItem[]
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member      Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  createdBy   User?        @relation("SaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items       SaleItem[]
+  // Ingreso que generó la venta en Finanzas (1 a 1).
+  transaction Transaction?
 
   @@index([gymId])
   @@index([memberId])
   @@index([gymId, soldAt])
+  @@index([createdById])
 }
 
 // =====================================================================
@@ -1107,6 +1152,12 @@ model RewardRedemption {
 //
 // Registro de "rutina completada" por el socio. Alimenta los retos de tipo
 // ROUTINE_COMPLETIONS. Máximo una por rutina por día (validado en servicio).
+//
+// DB-07 (WorkoutSession): por ahora esta tabla ES la sesión de entrenamiento
+// (quién, qué rutina, cuándo). Si se necesita registrar series reales (peso y
+// repeticiones por ejercicio), agregar WorkoutSet { routineLogId,
+// routineExerciseId, setNumber, reps, weightKg } colgando de aquí, en vez de
+// una tabla de sesiones paralela.
 // =====================================================================
 
 model RoutineLog {
@@ -1283,4 +1334,89 @@ model Referral {
   @@index([gymId])
   @@index([gymId, status])
   @@index([referrerId])
+}
+
+// =====================================================================
+// DATA MIGRATION — IMPORT JOBS (MIG-B01)
+// =====================================================================
+//
+// Historial de cada importación: quién, qué archivo y el resultado fila por
+// fila (errores incluidos) para poder auditarla o descargar el reporte.
+// =====================================================================
+
+model ImportJob {
+  id    String @id @default(uuid())
+  gymId String
+
+  type      ImportType
+  fileName  String
+  status    ImportStatus @default(RUNNING)
+  totalRows Int          @default(0)
+  processed Int          @default(0)
+  created   Int          @default(0)
+  updated   Int          @default(0)
+  skipped   Int          @default(0)
+  failed    Int          @default(0)
+  // [{ row, status, message }] de las filas con error u omitidas.
+  issues    Json?
+
+  createdById String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@index([gymId, startedAt])
+}
+
+// =====================================================================
+// TRAINING — EXERCISE CATALOG (DB-06)
+// =====================================================================
+//
+// Catálogo de ejercicios del gym. Se alimenta solo: al guardar una rutina
+// estructurada (p. ej. la que genera la IA) se reutiliza el ejercicio por
+// nombre (sin distinguir mayúsculas) o se crea.
+// =====================================================================
+
+model Exercise {
+  id    String @id @default(uuid())
+  gymId String
+
+  name        String
+  muscleGroup String?
+  equipment   String?
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym              Gym               @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  routineExercises RoutineExercise[]
+
+  @@unique([gymId, name])
+  @@index([gymId])
+}
+
+// Ejercicio dentro de una rutina: día, orden y prescripción.
+model RoutineExercise {
+  id         String @id @default(uuid())
+  gymId      String
+  routineId  String
+  exerciseId String
+
+  day         Int     // 1..7 (día de la rutina, no día de la semana)
+  order       Int     // posición dentro del día
+  sets        Int
+  reps        String  // "10-12", "30s", "al fallo"…
+  restSeconds Int?
+  notes       String?
+
+  gym      Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  routine  Routine  @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  // Restrict: no se puede borrar un ejercicio que está en uso.
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([gymId])
+  @@index([routineId, day, order])
+  @@index([exerciseId])
 }

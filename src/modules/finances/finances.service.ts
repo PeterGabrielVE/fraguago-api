@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Currency, Prisma, TransactionType } from '@prisma/client';
+import { Currency, PaymentMethod, Prisma, TransactionType } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -48,7 +48,14 @@ export class FinancesService {
     return { currency: resolvedCurrency, exchangeRate: rate, amountBase: Math.round((amount / rate) * 100) / 100 };
   }
 
-  async create(gymId: string, dto: CreateTransactionDto) {
+  // `tx` opcional: permite registrar el ingreso dentro de una transacción
+  // mayor (p. ej. la importación: membresía + pago, todo o nada).
+  async create(
+    gymId: string,
+    dto: CreateTransactionDto,
+    tx?: Pick<ScopedPrismaClient, 'transaction'>,
+    links?: { saleId?: string; createdById?: string; paymentMethod?: PaymentMethod | null },
+  ) {
     const { currency, exchangeRate, amountBase } = await this.resolveCurrency(
       gymId,
       dto.amount,
@@ -56,7 +63,7 @@ export class FinancesService {
       dto.exchangeRate,
     );
 
-    return this.prisma.transaction.create({
+    return (tx ?? this.prisma).transaction.create({
       data: {
         gymId,
         type: dto.type,
@@ -68,6 +75,9 @@ export class FinancesService {
         memberId: dto.memberId,
         note: dto.note,
         date: dto.date ? new Date(dto.date) : undefined,
+        saleId: links?.saleId,
+        createdById: links?.createdById,
+        paymentMethod: links?.paymentMethod ?? undefined,
       },
     });
   }
@@ -122,8 +132,19 @@ export class FinancesService {
     return tx;
   }
 
+  // DB-05 — el ingreso de una venta POS es parte de la venta: editarlo o
+  // borrarlo desde Finanzas dejaría la venta y la caja desalineadas.
+  private assertNotFromSale(tx: { saleId: string | null }) {
+    if (tx.saleId) {
+      throw new BadRequestException(
+        'Este ingreso pertenece a una venta del punto de venta y no se edita desde Finanzas',
+      );
+    }
+  }
+
   async update(gymId: string, id: string, dto: UpdateTransactionDto) {
     const current = await this.findOne(gymId, id);
+    this.assertNotFromSale(current);
 
     // Construimos el objeto explícitamente para no arrastrar 'date' como string
     // ni romper con fechas vacías/inválidas.
@@ -149,7 +170,7 @@ export class FinancesService {
   }
 
   async remove(gymId: string, id: string) {
-    await this.findOne(gymId, id);
+    this.assertNotFromSale(await this.findOne(gymId, id));
     return this.prisma.transaction.delete({ where: { id } });
   }
 

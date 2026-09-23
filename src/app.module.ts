@@ -38,6 +38,8 @@ import { GamificationModule } from './modules/gamification/gamification.module';
 import { ChallengesModule } from './modules/challenges/challenges.module';
 import { RetentionModule } from './modules/retention/retention.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
+import { ImportsModule } from './modules/imports/imports.module';
+import { ExportsModule } from './modules/exports/exports.module';
 
 @Module({
   imports: [
@@ -73,6 +75,8 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
     ChallengesModule,      // community challenges + leaderboards
     RetentionModule,       // automated messages + daily retention job
     ReferralsModule,       // referral codes program
+    ImportsModule,         // bulk import from Excel/CSV
+    ExportsModule,         // CSV/Excel exports
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
