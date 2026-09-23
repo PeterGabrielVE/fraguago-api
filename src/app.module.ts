@@ -33,6 +33,7 @@ import { UsersModule } from './users/users.module';
 import { GymModule } from './modules/gym/gym.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
+import { PortalModule } from './portal/portal.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.mod
     GymModule,
     AiModule,             // AI-powered routine generation
     ExchangeRatesModule,
+    PortalModule,          // self-service portal for Role.MEMBER
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user

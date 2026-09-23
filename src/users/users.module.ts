@@ -8,5 +8,6 @@ import { AuthModule } from 'src/auth/auth.module';
   imports: [AuthModule], // para inyectar PasswordService
   controllers: [UsersController],
   providers: [UsersService],
+  exports: [UsersService],
 })
 export class UsersModule {}

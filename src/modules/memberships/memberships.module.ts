@@ -9,5 +9,6 @@ import { FinancesModule } from '../finances/finances.module';
   imports: [AuthModule, FinancesModule],
   controllers: [MembershipsController, MemberMembershipsController],
   providers: [MembershipsService],
+  exports: [MembershipsService],
 })
 export class MembershipsModule {}
