@@ -196,6 +196,12 @@ export class PortalController {
     return this.service.getChallengeLeaderboard(gymId, user.id, id, query.limit);
   }
 
+  // RET-B04 — programa de referidos del socio.
+  @Get('referral')
+  getReferral(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getReferral(gymId, user.id);
+  }
+
   @Sse('challenges/:id/stream')
   streamChallenge(
     @GymId() gymId: string,

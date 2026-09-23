@@ -111,6 +111,30 @@ enum PointsSource {
   REDEMPTION // canje de recompensa (negativo)
   REDEMPTION_REFUND // devolución por canje cancelado
   CHALLENGE // premio por completar un reto
+  REFERRAL // premio del programa de referidos
+}
+
+// Canal por el que sale un mensaje (RET-B01).
+enum MessageChannel {
+  EMAIL
+  WHATSAPP
+}
+
+// Evento que dispara un mensaje automático (RET-B02 / RET-B03).
+enum AutomationTrigger {
+  INACTIVITY          // socio con membresía vigente que dejó de venir
+  MEMBERSHIP_EXPIRING // membresía que vence en los próximos N días
+}
+
+enum MessageStatus {
+  SENT
+  FAILED
+  SKIPPED // canal no configurado o destinatario sin dato de contacto
+}
+
+enum ReferralStatus {
+  PENDING  // registrado; el referido todavía no tiene membresía
+  REWARDED // el referido activó su primera membresía y se pagó el premio
 }
 
 // Qué mide el progreso de un reto (siempre dentro de su ventana de fechas).
@@ -193,6 +217,10 @@ model Gym {
   challenges            Challenge[]
   challengeParticipants ChallengeParticipant[]
   routineLogs           RoutineLog[]
+
+  automatedMessages AutomatedMessage[]
+  messageLogs       MessageLog[]
+  referrals         Referral[]
 
   @@index([name])
 }
@@ -344,6 +372,10 @@ model Member {
   pointsBalance  Int @default(0)
   lifetimePoints Int @default(0)
 
+  // Programa de referidos: código que el socio comparte (único por gym).
+  // Se genera la primera vez que el socio lo consulta.
+  referralCode String?
+
   joinedAt  DateTime @default(now())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -368,7 +400,12 @@ model Member {
   challengeParticipations ChallengeParticipant[]
   routineLogs             RoutineLog[]
 
+  messageLogs   MessageLog[]
+  referralsMade Referral[]  @relation("ReferralReferrer")
+  referredBy    Referral?   @relation("ReferralReferred")
+
   @@unique([gymId, identificationNumber])
+  @@unique([gymId, referralCode])
   @@index([gymId])
   @@index([userId])
 }
@@ -1143,4 +1180,107 @@ model ChallengeParticipant {
   @@index([gymId])
   @@index([memberId])
   @@index([challengeId, progress])
+}
+
+// =====================================================================
+// RETENTION — AUTOMATED MESSAGES (RET-B03)
+// =====================================================================
+//
+// Mensaje configurado por el gym que el cron diario envía cuando se cumple
+// su disparador. `body`/`subject` aceptan variables {{nombre}}, {{gimnasio}},
+// {{dias_inactivo}}, {{ultima_visita}}, {{plan}}, {{vence}}.
+// =====================================================================
+
+model AutomatedMessage {
+  id    String @id @default(uuid())
+  gymId String
+
+  name             String
+  trigger          AutomationTrigger
+  channel          MessageChannel    @default(EMAIL)
+  // INACTIVITY: días sin asistir. MEMBERSHIP_EXPIRING: días antes del vencimiento.
+  triggerDays      Int
+  // No reenviar al mismo socio antes de N días (y, en inactividad, solo una
+  // vez por racha: se vuelve a enviar si vino y volvió a faltar).
+  cooldownDays     Int               @default(7)
+  subject          String?
+  body             String
+  // WhatsApp solo permite iniciar conversación con plantillas aprobadas en Meta.
+  whatsappTemplate String?
+  active           Boolean           @default(true)
+  lastRunAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym  Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  logs MessageLog[]
+
+  @@index([gymId])
+  @@index([gymId, active, trigger])
+}
+
+// =====================================================================
+// RETENTION — MESSAGE LOG (RET-B01)
+// =====================================================================
+//
+// Historial inmutable de cada envío (automático o de prueba). También es la
+// base del anti-spam: el cron consulta aquí antes de reenviar.
+// =====================================================================
+
+model MessageLog {
+  id                 String  @id @default(uuid())
+  gymId              String
+  memberId           String?
+  automatedMessageId String?
+
+  channel   MessageChannel
+  trigger   AutomationTrigger?
+  recipient String
+  subject   String?
+  body      String
+  status    MessageStatus
+  error     String?
+
+  createdAt DateTime @default(now())
+
+  gym              Gym               @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member           Member?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  automatedMessage AutomatedMessage? @relation(fields: [automatedMessageId], references: [id], onDelete: SetNull)
+
+  @@index([gymId, createdAt])
+  @@index([automatedMessageId, memberId, createdAt])
+}
+
+// =====================================================================
+// RETENTION — REFERRALS (RET-B04)
+// =====================================================================
+//
+// Un socio (referrer) trae a otro (referred). Cada socio puede haber sido
+// referido una sola vez. El premio se paga cuando el referido tiene su
+// primera membresía (no al registrarse), para que no se pueda abusar.
+// =====================================================================
+
+model Referral {
+  id         String @id @default(uuid())
+  gymId      String
+  referrerId String
+  referredId String @unique
+  code       String // código usado (snapshot)
+
+  status         ReferralStatus @default(PENDING)
+  referrerPoints Int            @default(0)
+  referredPoints Int            @default(0)
+  rewardedAt     DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  gym      Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  referrer Member @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referred Member @relation("ReferralReferred", fields: [referredId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([gymId, status])
+  @@index([referrerId])
 }

@@ -8,6 +8,7 @@ import { ProgressService } from '../modules/progress/progress.service';
 import { GamificationService } from '../modules/gamification/gamification.service';
 import { RewardsService } from '../modules/gamification/rewards.service';
 import { ChallengesService } from '../modules/challenges/challenges.service';
+import { ReferralsService } from '../modules/referrals/referrals.service';
 import { ChallengeStatus } from '../modules/challenges/dto/list-challenges-query.dto';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
@@ -28,6 +29,7 @@ export class PortalService {
     private readonly gamificationService: GamificationService,
     private readonly rewardsService: RewardsService,
     private readonly challengesService: ChallengesService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   // Resuelve el Member vinculado al User autenticado. Protege contra un
@@ -167,5 +169,11 @@ export class PortalService {
 
   assertChallengeStreamable(gymId: string, challengeId: string) {
     return this.challengesService.assertStreamable(gymId, challengeId, true);
+  }
+
+  // RET-B04 — mi código de referido (se genera la primera vez) y mis referidos.
+  async getReferral(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.referralsService.forMember(gymId, memberId);
   }
 }

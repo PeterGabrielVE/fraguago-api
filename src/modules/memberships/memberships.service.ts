@@ -5,12 +5,14 @@ import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { PaginationDto } from "src/common/dto/pagination.dto";
 import { paginate } from "src/common/pagination";
 import { FinancesService } from "../finances/finances.service";
+import { ReferralsService } from "../referrals/referrals.service";
 
 @Injectable()
 export class MembershipsService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
     private readonly financesService: FinancesService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   // única fuente de verdad para la fecha de vencimiento.
@@ -66,6 +68,10 @@ export class MembershipsService {
       note: `Pago membresía: ${plan.name}`,
       date: start.toISOString(),
     });
+
+    // RET-B04 — si el socio llegó referido, su primera membresía libera el
+    // premio del programa (no rompe la asignación si falla).
+    await this.referralsService.onMembershipCreated(gymId, input.memberId);
 
     return membership;
   }

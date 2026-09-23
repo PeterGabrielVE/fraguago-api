@@ -9,6 +9,7 @@ import { RoutinesModule } from '../modules/routines/routines.module';
 import { ProgressModule } from '../modules/progress/progress.module';
 import { GamificationModule } from '../modules/gamification/gamification.module';
 import { ChallengesModule } from '../modules/challenges/challenges.module';
+import { ReferralsModule } from '../modules/referrals/referrals.module';
 
 // Portal de autoservicio para socios (Role.MEMBER). No duplica lógica de
 // negocio: reutiliza los servicios ya existentes de cada módulo, resolviendo
@@ -23,6 +24,7 @@ import { ChallengesModule } from '../modules/challenges/challenges.module';
     ProgressModule,
     GamificationModule,
     ChallengesModule,
+    ReferralsModule,
   ],
   controllers: [PortalController],
   providers: [PortalService],
