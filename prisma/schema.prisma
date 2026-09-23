@@ -103,6 +103,36 @@ enum Currency {
   EUR
 }
 
+// Origen de un movimiento de puntos (ledger de gamificación).
+enum PointsSource {
+  MANUAL // otorgado/deducido a mano por el staff
+  ATTENDANCE // check-in diario
+  BADGE // bono por desbloquear una insignia
+  REDEMPTION // canje de recompensa (negativo)
+  REDEMPTION_REFUND // devolución por canje cancelado
+}
+
+// Regla con la que se desbloquea automáticamente una insignia.
+enum BadgeCriteria {
+  MANUAL // solo la otorga el staff
+  ATTENDANCE_COUNT // asistencias totales >= threshold
+  LIFETIME_POINTS // puntos acumulados históricos >= threshold
+}
+
+enum RewardType {
+  DISCOUNT_PERCENT // value = % de descuento (1-100)
+  DISCOUNT_AMOUNT // value = monto fijo en la moneda base del gym
+  PRODUCT
+  SERVICE
+  OTHER
+}
+
+enum RedemptionStatus {
+  PENDING // canjeado por el socio, falta entregarlo/aplicarlo
+  FULFILLED // entregado/aplicado por el staff
+  CANCELLED // anulado: se devuelven puntos y stock
+}
+
 // =====================================================================
 // TENANT / GYM
 // =====================================================================
@@ -144,6 +174,13 @@ model Gym {
   medicalProfiles   MedicalProfile[]
 
   exchangeRates ExchangeRate[]
+
+  tiers              Tier[]
+  pointsTransactions PointsTransaction[]
+  badges             Badge[]
+  memberBadges       MemberBadge[]
+  rewards            Reward[]
+  rewardRedemptions  RewardRedemption[]
 
   @@index([name])
 }
@@ -290,6 +327,11 @@ model Member {
 
   status MemberStatus @default(ACTIVE)
 
+  // Gamificación: saldo canjeable y acumulado histórico (define el nivel).
+  // Se mantienen desnormalizados; la fuente de verdad es PointsTransaction.
+  pointsBalance  Int @default(0)
+  lifetimePoints Int @default(0)
+
   joinedAt  DateTime @default(now())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -306,6 +348,10 @@ model Member {
   attendances  Attendance[]
   sales      Sale[]
   measurements Measurement[]
+
+  pointsTransactions PointsTransaction[]
+  badges             MemberBadge[]
+  rewardRedemptions  RewardRedemption[]
 
   @@unique([gymId, identificationNumber])
   @@index([gymId])
@@ -840,4 +886,162 @@ model StockMovement {
   @@index([gymId])
   @@index([productId])
   @@index([gymId, createdAt])
+}
+
+
+// =====================================================================
+// GAMIFICATION — TIERS (niveles)
+// =====================================================================
+//
+// Niveles configurables por gym, definidos por un umbral de puntos
+// acumulados históricos (Member.lifetimePoints). Si un gym no define
+// ninguno, el backend usa un set por defecto (Bronce/Plata/Oro/Platino).
+// =====================================================================
+
+model Tier {
+  id    String @id @default(uuid())
+  gymId String
+
+  name      String
+  minPoints Int
+  color     String? // hex para la UI, ej. "#CD7F32"
+  benefits  String?
+
+  createdAt DateTime @default(now())
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@unique([gymId, minPoints])
+  @@index([gymId])
+}
+
+// =====================================================================
+// GAMIFICATION — POINTS LEDGER
+// =====================================================================
+//
+// Cada fila es inmutable: un movimiento de puntos (+ otorga / - deduce),
+// el saldo resultante, su origen y quién lo hizo. Nunca se edita ni se
+// borra (igual que StockMovement).
+// =====================================================================
+
+model PointsTransaction {
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
+
+  points       Int // +otorgado / -deducido
+  balanceAfter Int // saldo del socio DESPUÉS del movimiento
+  source       PointsSource
+  reason       String?
+  referenceId  String? // attendanceId, memberBadgeId, redemptionId…
+
+  createdById String? // user que lo registró (null = automático)
+  createdAt   DateTime @default(now())
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+  @@index([memberId])
+  @@index([gymId, memberId, createdAt])
+}
+
+// =====================================================================
+// GAMIFICATION — BADGES (insignias)
+// =====================================================================
+
+model Badge {
+  id    String @id @default(uuid())
+  gymId String
+
+  name         String
+  description  String?
+  icon         String? // clave de ícono de la UI (flame, trophy, star…)
+  criteria     BadgeCriteria @default(MANUAL)
+  threshold    Int? // requerido salvo criteria MANUAL
+  pointsReward Int           @default(0) // bono al desbloquearla
+  active       Boolean       @default(true)
+
+  createdAt DateTime @default(now())
+
+  gym          Gym           @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberBadges MemberBadge[]
+
+  @@index([gymId])
+}
+
+// Insignia desbloqueada por un socio. `seenAt` null = el socio todavía no
+// vio el pop-up de desbloqueo en el portal.
+model MemberBadge {
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
+  badgeId  String
+
+  awardedAt DateTime  @default(now())
+  seenAt    DateTime?
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  badge  Badge  @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, badgeId])
+  @@index([gymId])
+  @@index([memberId, seenAt])
+}
+
+// =====================================================================
+// GAMIFICATION — REWARDS (catálogo canjeable)
+// =====================================================================
+
+model Reward {
+  id    String @id @default(uuid())
+  gymId String
+
+  name              String
+  description       String?
+  type              RewardType
+  value             Decimal?   @db.Decimal(10, 2) // % o monto según type
+  pointsCost        Int
+  stock             Int? // null = ilimitado
+  // Puntos acumulados mínimos (nivel) para poder canjearla. null = cualquiera.
+  minLifetimePoints Int?
+  validUntil        DateTime?
+  active            Boolean    @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  gym         Gym                @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  redemptions RewardRedemption[]
+
+  @@index([gymId])
+  @@index([gymId, active])
+}
+
+// Canje de una recompensa por un socio. `code` es lo que el socio muestra
+// en recepción para que el staff lo valide y lo marque como entregado.
+model RewardRedemption {
+  id       String @id @default(uuid())
+  gymId    String
+  memberId String
+  rewardId String
+
+  pointsSpent Int
+  code        String
+  status      RedemptionStatus @default(PENDING)
+
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  reward Reward @relation(fields: [rewardId], references: [id])
+
+  @@unique([gymId, code])
+  @@index([gymId])
+  @@index([memberId])
+  @@index([rewardId])
+  @@index([gymId, status])
 }

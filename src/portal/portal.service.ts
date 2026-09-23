@@ -5,6 +5,8 @@ import { MembershipsService } from '../modules/memberships/memberships.service';
 import { AttendanceService } from '../modules/attendance/attendance.service';
 import { RoutinesService } from '../modules/routines/routines.service';
 import { ProgressService } from '../modules/progress/progress.service';
+import { GamificationService } from '../modules/gamification/gamification.service';
+import { RewardsService } from '../modules/gamification/rewards.service';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
 
@@ -21,6 +23,8 @@ export class PortalService {
     private readonly attendanceService: AttendanceService,
     private readonly routinesService: RoutinesService,
     private readonly progressService: ProgressService,
+    private readonly gamificationService: GamificationService,
+    private readonly rewardsService: RewardsService,
   ) {}
 
   // Resuelve el Member vinculado al User autenticado. Protege contra un
@@ -71,5 +75,47 @@ export class PortalService {
   async getProgress(gymId: string, userId: string, pagination: PaginationDto) {
     const memberId = await this.resolveMemberId(gymId, userId);
     return this.progressService.findAll(gymId, pagination, memberId);
+  }
+
+  // --- Gamificación (GAM-B02 / GAM-01 / GAM-F02) ---
+
+  async getGamification(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.gamificationService.summary(gymId, memberId);
+  }
+
+  async getPoints(gymId: string, userId: string, pagination: PaginationDto) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.gamificationService.pointsHistory(
+      gymId,
+      memberId,
+      pagination.page ?? 1,
+      pagination.pageSize ?? 20,
+    );
+  }
+
+  async getUnseenBadges(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.gamificationService.unseenBadges(gymId, memberId);
+  }
+
+  async markBadgesSeen(gymId: string, userId: string, ids?: string[]) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.gamificationService.markBadgesSeen(gymId, memberId, ids);
+  }
+
+  async getRewards(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.rewardsService.catalogFor(gymId, memberId);
+  }
+
+  async redeemReward(gymId: string, userId: string, rewardId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.rewardsService.redeem(gymId, memberId, rewardId);
+  }
+
+  async getRedemptions(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.rewardsService.memberRedemptions(gymId, memberId);
   }
 }

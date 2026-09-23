@@ -6,11 +6,13 @@ import {
 } from "@nestjs/common";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { AttendanceShift, Prisma } from "@prisma/client";
+import { GamificationService } from "../gamification/gamification.service";
 
 @Injectable()
 export class AttendanceService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
+    private readonly gamification: GamificationService,
   ) {}
 
   // Bloque de datos del socio reutilizado en los listados.
@@ -75,9 +77,14 @@ export class AttendanceService {
       );
     }
 
-    return this.prisma.attendance.create({
+    const attendance = await this.prisma.attendance.create({
       data: { gymId, memberId, shift: this.shiftFromHour(now) },
     });
+
+    // GAM-B02 — puntos por asistencia + insignias desbloqueadas. Nunca rompe
+    // el check-in (onCheckIn captura sus propios errores).
+    const gamification = await this.gamification.onCheckIn(gymId, memberId, attendance.id);
+    return { ...attendance, gamification };
   }
 
   // B01 — GET /attendance (listado general paginado, opcionalmente filtrado

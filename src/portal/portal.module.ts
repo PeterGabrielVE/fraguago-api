@@ -7,6 +7,7 @@ import { MembershipsModule } from '../modules/memberships/memberships.module';
 import { AttendanceModule } from '../modules/attendance/attendance.module';
 import { RoutinesModule } from '../modules/routines/routines.module';
 import { ProgressModule } from '../modules/progress/progress.module';
+import { GamificationModule } from '../modules/gamification/gamification.module';
 
 // Portal de autoservicio para socios (Role.MEMBER). No duplica lógica de
 // negocio: reutiliza los servicios ya existentes de cada módulo, resolviendo
@@ -19,6 +20,7 @@ import { ProgressModule } from '../modules/progress/progress.module';
     AttendanceModule,
     RoutinesModule,
     ProgressModule,
+    GamificationModule,
   ],
   controllers: [PortalController],
   providers: [PortalService],

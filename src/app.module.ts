@@ -34,6 +34,7 @@ import { GymModule } from './modules/gym/gym.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
 import { PortalModule } from './portal/portal.module';
+import { GamificationModule } from './modules/gamification/gamification.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { PortalModule } from './portal/portal.module';
     AiModule,             // AI-powered routine generation
     ExchangeRatesModule,
     PortalModule,          // self-service portal for Role.MEMBER
+    GamificationModule,    // points, tiers, badges and rewards
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user

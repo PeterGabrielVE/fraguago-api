@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PortalService } from './portal.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,6 +8,7 @@ import { GymId } from '../auth/decorators/gym-id.decorator';
 import { CurrentUser, AuthenticatedUser } from '../auth/decorators/current-user.decorator';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { UpdateUserDto } from '../users/dto/update-user.dto';
+import { MarkBadgesSeenDto } from '../modules/gamification/dto/mark-badges-seen.dto';
 
 // Portal de autoservicio: solo socios (Role.MEMBER) pueden acceder. ADMIN,
 // STAFF y TRAINER reciben 403 acá (intencional): este board es exclusivo
@@ -64,5 +65,55 @@ export class PortalController {
     @Query() pagination: PaginationDto,
   ) {
     return this.service.getProgress(gymId, user.id, pagination);
+  }
+
+  // GAM-B02 — saldo, nivel e insignias del socio.
+  @Get('gamification')
+  getGamification(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getGamification(gymId, user.id);
+  }
+
+  @Get('points')
+  getPoints(
+    @GymId() gymId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() pagination: PaginationDto,
+  ) {
+    return this.service.getPoints(gymId, user.id, pagination);
+  }
+
+  // GAM-F02 — insignias desbloqueadas pendientes de mostrar en pop-up.
+  @Get('badges/unseen')
+  getUnseenBadges(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getUnseenBadges(gymId, user.id);
+  }
+
+  @Post('badges/seen')
+  markBadgesSeen(
+    @GymId() gymId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarkBadgesSeenDto,
+  ) {
+    return this.service.markBadgesSeen(gymId, user.id, dto.ids);
+  }
+
+  // GAM-01 — catálogo canjeable y canje.
+  @Get('rewards')
+  getRewards(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getRewards(gymId, user.id);
+  }
+
+  @Post('rewards/:rewardId/redeem')
+  redeemReward(
+    @GymId() gymId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('rewardId') rewardId: string,
+  ) {
+    return this.service.redeemReward(gymId, user.id, rewardId);
+  }
+
+  @Get('redemptions')
+  getRedemptions(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getRedemptions(gymId, user.id);
   }
 }
