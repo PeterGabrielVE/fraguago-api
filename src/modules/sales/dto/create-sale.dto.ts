@@ -1,9 +1,8 @@
 import { Type } from 'class-transformer';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentFieldsDto } from '../../finances/payment-details';
 import {
   ArrayMinSize,
   IsArray,
-  IsEnum,
   IsInt,
   IsOptional,
   IsUUID,
@@ -20,7 +19,8 @@ export class SaleItemDto {
   quantity!: number;
 }
 
-export class CreateSaleDto {
+// Incluye método y comprobante del pago (referencia, banco, foto…).
+export class CreateSaleDto extends PaymentFieldsDto {
   @IsOptional()
   @IsUUID()
   memberId?: string;
@@ -31,8 +31,4 @@ export class CreateSaleDto {
   @Type(() => SaleItemDto)
   items!: SaleItemDto[];
 
-  // DB-03 — efectivo, tarjeta, transferencia u otro.
-  @IsOptional()
-  @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
 }

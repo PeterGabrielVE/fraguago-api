@@ -40,6 +40,7 @@ import { RetentionModule } from './modules/retention/retention.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { ExportsModule } from './modules/exports/exports.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { ExportsModule } from './modules/exports/exports.module';
     ReferralsModule,       // referral codes program
     ImportsModule,         // bulk import from Excel/CSV
     ExportsModule,         // CSV/Excel exports
+    PaymentsModule,        // payment receipts + OCR
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user

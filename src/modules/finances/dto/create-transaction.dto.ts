@@ -1,7 +1,9 @@
 import { IsEnum, IsNumber, IsOptional, IsString, IsDateString, IsPositive } from 'class-validator';
 import { TransactionType, Currency } from '@prisma/client';
+import { PaymentFieldsDto } from '../payment-details';
 
-export class CreateTransactionDto {
+// Incluye los datos del comprobante (método, referencia, banco, foto…).
+export class CreateTransactionDto extends PaymentFieldsDto {
   @IsEnum(TransactionType) type!: TransactionType;     // INCOME | EXPENSE
   @IsNumber() @IsPositive() amount!: number;
   @IsOptional() @IsEnum(Currency) currency?: Currency; // moneda en la que se pagó; default: moneda base del gym

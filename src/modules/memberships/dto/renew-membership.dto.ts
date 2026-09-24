@@ -1,4 +1,6 @@
-import { IsUUID, IsDateString, IsOptional } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsUUID, IsDateString, IsOptional, ValidateNested } from 'class-validator';
+import { MembershipPaymentDto } from './membership-payment.dto';
 
 export class RenewMembershipDto {
   @IsOptional()
@@ -8,4 +10,10 @@ export class RenewMembershipDto {
   @IsOptional()
   @IsDateString()
   startDate?: string;
+
+  // Cómo se pagó (método, referencia, comprobante, monto real).
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MembershipPaymentDto)
+  payment?: MembershipPaymentDto;
 }

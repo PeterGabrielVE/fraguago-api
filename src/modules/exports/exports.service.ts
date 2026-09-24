@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { ExportColumn, toCsv, toXlsx } from './file-writers';
 import { ExportQueryDto, ExportResource } from './dto/export-query.dto';
+import { PAYMENT_METHOD_LABELS } from '../finances/payment-details';
 
 // Tope de filas por archivo: por encima, conviene acotar el rango de fechas.
 const MAX_EXPORT_ROWS = 20_000;
@@ -188,6 +189,9 @@ export class ExportsService {
         exchangeRate: true,
         amountBase: true,
         paymentMethod: true,
+        paymentReference: true,
+        paymentBank: true,
+        payerName: true,
         note: true,
         concept: { select: { name: true } },
         member: { select: { user: { select: { profile: { select: { firstName: true, lastName: true } } } } } },
@@ -204,7 +208,10 @@ export class ExportsService {
     { header: 'Moneda', value: (t) => t.currency, width: 8 },
     { header: 'Tasa', value: (t) => Number(t.exchangeRate), numFmt: '#,##0.0000', width: 12 },
     { header: 'Monto (moneda base)', value: (t) => Number(t.amountBase), numFmt: MONEY_FMT, width: 18 },
-    { header: 'Método de pago', value: (t) => t.paymentMethod ?? '', width: 14 },
+    { header: 'Método de pago', value: (t) => (t.paymentMethod ? PAYMENT_METHOD_LABELS[t.paymentMethod] : ''), width: 14 },
+    { header: 'Referencia', value: (t) => t.paymentReference ?? '', width: 16 },
+    { header: 'Banco', value: (t) => t.paymentBank ?? '', width: 16 },
+    { header: 'Titular', value: (t) => t.payerName ?? '', width: 20 },
     { header: 'Nota', value: (t) => t.note ?? '', width: 40 },
   ];
 }

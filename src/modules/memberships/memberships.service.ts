@@ -1,10 +1,11 @@
 // modules/memberships/memberships.service.ts
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { TransactionType, MembershipStatus } from "@prisma/client";
+import { Currency, MembershipStatus, Prisma, TransactionType } from "@prisma/client";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { PaginationDto } from "src/common/dto/pagination.dto";
 import { paginate } from "src/common/pagination";
 import { FinancesService } from "../finances/finances.service";
+import { MembershipPaymentDto } from "./dto/membership-payment.dto";
 import { ReferralsService } from "../referrals/referrals.service";
 
 @Injectable()
@@ -39,34 +40,62 @@ export class MembershipsService {
   } as const;
 
   // assign. endDate = start + plan.durationDays.
+  // Ingreso de la membresía con los datos del pago. Por defecto cobra el
+  // precio del plan en su moneda; si el socio pagó otro monto/moneda (p. ej.
+  // Bs por pago móvil), FinancesService lo convierte a la moneda base.
+  private paymentIncome(
+    plan: { name: string; price: Prisma.Decimal; currency: Currency },
+    memberId: string,
+    date: Date,
+    label: string,
+    payment?: MembershipPaymentDto,
+  ) {
+    const { amount, currency, exchangeRate, note, ...fields } = payment ?? {};
+    return {
+      type: TransactionType.INCOME,
+      amount: amount ?? Number(plan.price),
+      currency: currency ?? plan.currency,
+      exchangeRate,
+      memberId,
+      note: [`${label}: ${plan.name}`, note].filter(Boolean).join(" · "),
+      date: date.toISOString(),
+      ...fields,
+    };
+  }
+
   async assign(
     gymId: string,
-    input: { memberId: string; planId: string; startDate?: string },
+    input: { memberId: string; planId: string; startDate?: string; payment?: MembershipPaymentDto },
+    userId?: string,
   ) {
     const plan = await this.prisma.membershipPlan.findFirst({
       where: { id: input.planId, gymId },
     });
     if (!plan) throw new NotFoundException("Plan not found");
+    const member = await this.prisma.member.findFirst({ where: { id: input.memberId, gymId }, select: { id: true } });
+    if (!member) throw new NotFoundException("Socio no encontrado");
 
     const start = input.startDate ? new Date(input.startDate) : new Date();
-    const membership = await this.prisma.membership.create({
-      data: {
+    // Membresía + ingreso (+ comprobante): todo o nada. Si el pago se rechaza
+    // (p. ej. referencia ya usada), no queda una membresía sin cobrar.
+    const membership = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.membership.create({
+        data: {
+          gymId,
+          memberId: input.memberId,
+          planId: plan.id,
+          startDate: start,
+          endDate: this.addDays(start, plan.durationDays),
+        },
+      });
+      // Asignar un plan es venderlo: registra el ingreso.
+      await this.financesService.create(
         gymId,
-        memberId: input.memberId,
-        planId: plan.id,
-        startDate: start,
-        endDate: this.addDays(start, plan.durationDays),
-      },
-    });
-
-    // Registra el ingreso automáticamente: asignar un plan es venderlo.
-    await this.financesService.create(gymId, {
-      type: TransactionType.INCOME,
-      amount: Number(plan.price),
-      currency: plan.currency,
-      memberId: input.memberId,
-      note: `Pago membresía: ${plan.name}`,
-      date: start.toISOString(),
+        this.paymentIncome(plan, input.memberId, start, "Pago membresía", input.payment),
+        tx,
+        { createdById: userId },
+      );
+      return created;
     });
 
     // RET-B04 — si el socio llegó referido, su primera membresía libera el
@@ -169,7 +198,8 @@ export class MembershipsService {
   async renew(
     gymId: string,
     id: string,
-    input: { startDate?: string; planId?: string } = {},
+    input: { startDate?: string; planId?: string; payment?: MembershipPaymentDto } = {},
+    userId?: string,
   ) {
     const current = await this.prisma.membership.findFirst({
       where: { id, gymId },
@@ -191,27 +221,25 @@ export class MembershipsService {
         ? current.endDate
         : now;
 
-    const membership = await this.prisma.membership.update({
-      where: { id: current.id },
-      data: {
-        planId: plan.id,
-        startDate: base,
-        endDate: this.addDays(base, plan.durationDays),
-        status: MembershipStatus.ACTIVE,
-      },
+    // Renovar también es un cobro: membresía + ingreso, todo o nada.
+    return this.prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.update({
+        where: { id: current.id },
+        data: {
+          planId: plan.id,
+          startDate: base,
+          endDate: this.addDays(base, plan.durationDays),
+          status: MembershipStatus.ACTIVE,
+        },
+      });
+      await this.financesService.create(
+        gymId,
+        this.paymentIncome(plan, current.memberId, base, "Renovación membresía", input.payment),
+        tx,
+        { createdById: userId },
+      );
+      return membership;
     });
-
-    // Renovar también es un cobro: registra el ingreso.
-    await this.financesService.create(gymId, {
-      type: TransactionType.INCOME,
-      amount: Number(plan.price),
-      currency: plan.currency,
-      memberId: current.memberId,
-      note: `Renovación membresía: ${plan.name}`,
-      date: base.toISOString(),
-    });
-
-    return membership;
   }
 
   // Piso `gte: now` para no solaparse con las ya vencidas (B05).

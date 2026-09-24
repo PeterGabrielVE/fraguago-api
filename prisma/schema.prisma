@@ -97,6 +97,8 @@ enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+  PAGO_MOVIL // pago móvil interbancario (Venezuela)
+  ZELLE
   OTHER
 }
 
@@ -244,6 +246,8 @@ model Gym {
   referrals         Referral[]
 
   importJobs ImportJob[]
+
+  paymentReceipts PaymentReceipt[]
 
   exercises        Exercise[]
   routineExercises RoutineExercise[]
@@ -701,6 +705,14 @@ model Transaction {
   // DB-05 — venta POS que originó este ingreso (null = movimiento manual).
   saleId String? @unique
 
+  // Datos del comprobante (pago móvil, transferencia, Zelle…). La referencia
+  // es única por gym y método (índice parcial en la migración): evita que se
+  // use dos veces la misma captura.
+  paymentReference String?
+  paymentBank      String?
+  payerPhone       String?
+  payerName        String?
+
   createdById String?
 
   createdAt DateTime @default(now())
@@ -709,6 +721,7 @@ model Transaction {
   concept Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
   member  Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
   sale    Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  receipt PaymentReceipt?
 
   @@index([gymId])
   @@index([gymId, type])
@@ -1419,4 +1432,35 @@ model RoutineExercise {
   @@index([gymId])
   @@index([routineId, day, order])
   @@index([exerciseId])
+}
+
+// =====================================================================
+// PAYMENTS — RECEIPTS (comprobantes)
+// =====================================================================
+//
+// Foto opcional del comprobante de pago. Se sube antes de registrar el pago
+// (transactionId null) y se adjunta al ingreso al guardarlo; las que quedan
+// sin adjuntar se borran en el job diario. La imagen llega ya reducida desde
+// el navegador (JPEG ≤ 1600 px); se guarda en la base para no depender de
+// un storage externo — si el volumen crece, mover `data` a S3/R2.
+// =====================================================================
+
+model PaymentReceipt {
+  id            String  @id @default(uuid())
+  gymId         String
+  transactionId String? @unique
+
+  mimeType     String
+  size         Int
+  data         Bytes
+  // Lo que leyó el OCR (para auditar qué se autocompletó).
+  ocrData      Json?
+  uploadedById String?
+
+  createdAt DateTime @default(now())
+
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([gymId, createdAt])
 }

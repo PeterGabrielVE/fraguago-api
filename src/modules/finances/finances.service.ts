@@ -1,9 +1,15 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Currency, PaymentMethod, Prisma, TransactionType } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { NormalizedPayment, PAYMENT_METHOD_LABELS, normalizePayment } from './payment-details';
+
+// Cliente dentro de un $transaction interactivo.
+export type FinanceTx = Parameters<Parameters<ScopedPrismaClient['$transaction']>[0] extends infer F
+  ? F extends (tx: any) => any ? F : never
+  : never>[0];
 
 @Injectable()
 export class FinancesService {
@@ -50,12 +56,42 @@ export class FinancesService {
 
   // `tx` opcional: permite registrar el ingreso dentro de una transacción
   // mayor (p. ej. la importación: membresía + pago, todo o nada).
+  // Anti-fraude: la misma referencia no puede usarse dos veces con el mismo
+  // método (reusar la captura de un pago móvil). El índice único parcial de
+  // la base cubre además las carreras entre dos requests simultáneos.
+  private async assertReferenceFree(
+    client: Pick<FinanceTx, 'transaction'>,
+    gymId: string,
+    payment: NormalizedPayment,
+    exceptId?: string,
+  ) {
+    if (!payment.paymentReference || !payment.paymentMethod) return;
+    const used = await client.transaction.findFirst({
+      where: {
+        gymId,
+        paymentMethod: payment.paymentMethod,
+        paymentReference: payment.paymentReference,
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { date: true, amount: true, currency: true },
+    });
+    if (used) {
+      throw new ConflictException(
+        `La referencia ${payment.paymentReference} (${PAYMENT_METHOD_LABELS[payment.paymentMethod]}) ya fue registrada ` +
+        `el ${used.date.toLocaleDateString('es-VE')} por ${used.amount} ${used.currency}`,
+      );
+    }
+  }
+
+  // `tx` opcional: permite registrar el ingreso dentro de una transacción
+  // mayor (venta, membresía, importación): todo o nada.
   async create(
     gymId: string,
     dto: CreateTransactionDto,
-    tx?: Pick<ScopedPrismaClient, 'transaction'>,
+    tx?: FinanceTx,
     links?: { saleId?: string; createdById?: string; paymentMethod?: PaymentMethod | null },
   ) {
+    const payment = normalizePayment({ ...dto, paymentMethod: dto.paymentMethod ?? links?.paymentMethod ?? undefined });
     const { currency, exchangeRate, amountBase } = await this.resolveCurrency(
       gymId,
       dto.amount,
@@ -63,23 +99,44 @@ export class FinancesService {
       dto.exchangeRate,
     );
 
-    return (tx ?? this.prisma).transaction.create({
-      data: {
-        gymId,
-        type: dto.type,
-        amount: dto.amount,
-        currency,
-        exchangeRate,
-        amountBase,
-        conceptId: dto.conceptId,
-        memberId: dto.memberId,
-        note: dto.note,
-        date: dto.date ? new Date(dto.date) : undefined,
-        saleId: links?.saleId,
-        createdById: links?.createdById,
-        paymentMethod: links?.paymentMethod ?? undefined,
-      },
-    });
+    const run = async (client: FinanceTx) => {
+      await this.assertReferenceFree(client, gymId, payment);
+      let created;
+      try {
+        created = await client.transaction.create({
+          data: {
+            gymId,
+            type: dto.type,
+            amount: dto.amount,
+            currency,
+            exchangeRate,
+            amountBase,
+            conceptId: dto.conceptId,
+            memberId: dto.memberId,
+            note: dto.note,
+            date: dto.date ? new Date(dto.date) : undefined,
+            saleId: links?.saleId,
+            createdById: links?.createdById,
+            ...payment,
+          },
+        });
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' && payment.paymentReference) {
+          throw new ConflictException(`La referencia ${payment.paymentReference} ya fue registrada`);
+        }
+        throw err;
+      }
+      // Adjunta la foto del comprobante (subida antes y aún sin usar).
+      if (dto.receiptId) {
+        const { count } = await client.paymentReceipt.updateMany({
+          where: { id: dto.receiptId, gymId, transactionId: null },
+          data: { transactionId: created.id },
+        });
+        if (count === 0) throw new BadRequestException('El comprobante no existe o ya está asociado a otro pago');
+      }
+      return created;
+    };
+    return tx ? run(tx) : this.prisma.$transaction((t) => run(t));
   }
 
   // FIN-B02 / FIN-F06 — listado paginado, con filtros opcionales por type,
@@ -115,7 +172,8 @@ export class FinancesService {
         orderBy: { date: 'desc' },
         skip: (safePage - 1) * safePageSize,
         take: safePageSize,
-        include: { concept: true },
+        // Solo el id del comprobante (la imagen se pide aparte).
+        include: { concept: true, receipt: { select: { id: true } } },
       }),
       this.prisma.transaction.count({ where }),
     ]);
@@ -147,8 +205,30 @@ export class FinancesService {
     this.assertNotFromSale(current);
 
     // Construimos el objeto explícitamente para no arrastrar 'date' como string
-    // ni romper con fechas vacías/inválidas.
-    const data: Prisma.TransactionUpdateInput = { ...dto };
+    // ni romper con fechas vacías/inválidas. El comprobante solo se adjunta al
+    // crear el pago (receiptId no aplica en la edición).
+    const { receiptId: _receiptId, ...rest } = dto;
+    const data: Prisma.TransactionUpdateInput = { ...rest };
+
+    // Si cambian los datos del pago, se normalizan y se revalida la referencia.
+    const paymentKeys = ['paymentMethod', 'paymentReference', 'paymentBank', 'payerPhone', 'payerName'] as const;
+    if (paymentKeys.some((k) => dto[k] !== undefined)) {
+      const payment = normalizePayment({
+        paymentMethod: dto.paymentMethod ?? current.paymentMethod ?? undefined,
+        paymentReference: dto.paymentReference ?? current.paymentReference ?? undefined,
+        paymentBank: dto.paymentBank ?? current.paymentBank ?? undefined,
+        payerPhone: dto.payerPhone ?? current.payerPhone ?? undefined,
+        payerName: dto.payerName ?? current.payerName ?? undefined,
+      });
+      await this.assertReferenceFree(this.prisma, gymId, payment, id);
+      Object.assign(data, {
+        paymentMethod: payment.paymentMethod ?? null,
+        paymentReference: payment.paymentReference ?? null,
+        paymentBank: payment.paymentBank ?? null,
+        payerPhone: payment.payerPhone ?? null,
+        payerName: payment.payerName ?? null,
+      });
+    }
     if (dto.date !== undefined) {
       data.date = new Date(dto.date);
     }

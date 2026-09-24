@@ -22,7 +22,7 @@ export const TENANT_PRISMA = Symbol('TENANT_PRISMA');
  * transaction, para no re-disparar la extensión (recursión). Sin contexto,
  * devolvemos la query tal cual: RLS la deniega (current_setting NULL) => 0 filas.
  */
-export function withTenantScope(base: PrismaClient) {
+function scopeQueries(base: PrismaClient) {
   return base.$extends({
     query: {
       $allModels: {
@@ -40,6 +40,39 @@ export function withTenantScope(base: PrismaClient) {
       },
     },
   });
+}
+
+/**
+ * Transacciones INTERACTIVAS (`$transaction(async (tx) => …)`): la extensión
+ * de arriba envuelve cada query en su propia mini-transacción, así que dentro
+ * de un callback cada operación se confirmaba sola y un error NO revertía lo
+ * anterior (p. ej. quedaba la membresía creada aunque el pago fallara).
+ *
+ * Por eso se intercepta $transaction(fn): se abre UNA transacción real en el
+ * cliente base, se fija app.current_gym_id una vez (SET LOCAL, muere con el
+ * COMMIT/ROLLBACK) y el callback recibe ese cliente de transacción, cuyas
+ * queries corren en la misma conexión — RLS sigue aplicando y el ROLLBACK
+ * deshace todo. La forma en lote ($transaction([...])) no cambia.
+ */
+export function withTenantScope(base: PrismaClient) {
+  const scoped = scopeQueries(base);
+  return new Proxy(scoped, {
+    get(target, prop) {
+      if (prop !== '$transaction') return Reflect.get(target, prop);
+      return (arg: unknown, options?: Parameters<PrismaClient['$transaction']>[1]) => {
+        if (typeof arg !== 'function') {
+          return (target.$transaction as (a: unknown, o?: unknown) => unknown)(arg, options);
+        }
+        const gymId = tenantContext.getStore()?.gymId;
+        return base.$transaction(async (tx) => {
+          if (gymId) {
+            await tx.$executeRaw`SELECT set_config('app.current_gym_id', ${gymId}, true)`;
+          }
+          return (arg as (client: unknown) => Promise<unknown>)(tx);
+        }, options);
+      };
+    },
+  }) as typeof scoped;
 }
 
 export type ScopedPrismaClient = ReturnType<typeof withTenantScope>;

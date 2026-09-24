@@ -18,6 +18,7 @@ import { Role } from '@prisma/client';
 import { RenewMembershipDto } from './dto/renew-membership.dto';
 import { UpdateMembershipDto } from './dto/update-membership.dto';
 import { UpdateMembershipStatusDto } from './dto/update-membership-status.dto';
+import { CurrentUser, AuthenticatedUser } from '../../auth/decorators/current-user.decorator';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 @Controller('memberships')
@@ -69,10 +70,11 @@ export class MembershipsController {
   @Roles(Role.ADMIN, Role.STAFF)
   renew(
     @GymId() gymId: string,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RenewMembershipDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.service.renew(gymId, id, dto);
+    return this.service.renew(gymId, id, dto, user.id);
   }
 
   // Corrige socio/plan/fecha mal cargados. No genera un nuevo cobro.

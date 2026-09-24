@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, UseGuards } from "@nestjs/common";
 import { MembershipsService } from "./memberships.service";
 import { JwtAuthGuard } from "../../auth/jwt-auth.guard";
 import { RolesGuard } from "../../common/roles.guard";
@@ -7,6 +7,7 @@ import { Roles } from "../../auth/decorators/roles.decorator";
 import { Role } from "@prisma/client";
 import { AssignMembershipDto } from "./dto/assign-membership.dto";
 import { PaginationDto } from "src/common/dto/pagination.dto";
+import { CurrentUser, AuthenticatedUser } from "../../auth/decorators/current-user.decorator";
 
 @Controller("members/:memberId/memberships")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -17,10 +18,11 @@ export class MemberMembershipsController {
   @Roles(Role.ADMIN, Role.STAFF)
   assign(
     @GymId() gymId: string,
-    @Param("memberId") memberId: string,
+    @Param("memberId", ParseUUIDPipe) memberId: string,
     @Body() dto: AssignMembershipDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.service.assign(gymId, { memberId, ...dto });
+    return this.service.assign(gymId, { memberId, ...dto }, user.id);
   }
 
   @Get()

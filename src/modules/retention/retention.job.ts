@@ -4,6 +4,7 @@ import { SystemPrismaService } from '../../prisma/system-prisma.service';
 import { tenantContext } from '../../common/tenant/tenant.context';
 import { AutomationsService } from './automations.service';
 import { ReferralsService } from '../referrals/referrals.service';
+import { ReceiptsService } from '../payments/receipts.service';
 
 // Hora local del gimnasio (el contenedor suele correr en UTC).
 const CRON_TZ = process.env.RETENTION_CRON_TZ || 'America/Caracas';
@@ -25,6 +26,7 @@ export class RetentionJob {
     private readonly system: SystemPrismaService,
     private readonly automations: AutomationsService,
     private readonly referrals: ReferralsService,
+    private readonly receipts: ReceiptsService,
   ) {}
 
   @Cron('0 9 * * *', { name: 'retention-daily', timeZone: CRON_TZ })
@@ -70,5 +72,8 @@ export class RetentionJob {
     if (referrals.rewarded > 0) {
       this.logger.log(`[${gymName}] ${referrals.rewarded} referido(s) premiado(s)`);
     }
+    // Mantenimiento: fotos de comprobantes subidas pero nunca asociadas a un pago.
+    const orphans = await this.receipts.cleanupOrphans(gymId);
+    if (orphans > 0) this.logger.log(`[${gymName}] ${orphans} comprobante(s) huérfano(s) eliminado(s)`);
   }
 }

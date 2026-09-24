@@ -144,9 +144,15 @@ export class SalesService {
           currency,
           memberId: dto.memberId,
           note: `Venta POS ${sale.id}`,
+          paymentMethod: dto.paymentMethod,
+          paymentReference: dto.paymentReference,
+          paymentBank: dto.paymentBank,
+          payerPhone: dto.payerPhone,
+          payerName: dto.payerName,
+          receiptId: dto.receiptId,
         },
         tx,
-        { saleId: sale.id, createdById: userId, paymentMethod: dto.paymentMethod },
+        { saleId: sale.id, createdById: userId },
       );
 
       return { ...sale, transaction: { id: income.id, amountBase: income.amountBase, currency: income.currency, exchangeRate: income.exchangeRate } };
