@@ -23,6 +23,7 @@ async function bootstrap() {
     }),
   );
   app.useGlobalFilters(new PrismaExceptionFilter());
+  app.enableShutdownHooks(); // vacía la cola de PostHog al apagar
   await app.listen(process.env.PORT ?? 3001);
 }
 bootstrap();

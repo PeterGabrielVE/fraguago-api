@@ -6,6 +6,8 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditInterceptor } from './common/audit.interceptor';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { AnalyticsInterceptor } from './analytics/analytics.interceptor';
 
 import { MembersModule } from './modules/members/members.module';
 import { MembershipPlansModule } from './modules/membership-plans/membership-plans.module';
@@ -47,6 +49,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AnalyticsModule,     // global: PostHog (no-op sin POSTHOG_API_KEY)
     AuthModule,
     LogsModule,          // global: exposes LogsService to the interceptor
     MembersModule,
@@ -85,6 +88,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     { provide: APP_GUARD, useClass: RolesGuard },      // 2º: usa req.user
     { provide: APP_INTERCEPTOR, useClass: TenantInterceptor }, // auto-set tenant context
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }, // auto-audit all mutations
+    { provide: APP_INTERCEPTOR, useClass: AnalyticsInterceptor }, // eventos de uso -> PostHog
   ],
 })
 export class AppModule {}

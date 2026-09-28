@@ -8,6 +8,7 @@ import { createHash, randomBytes } from "crypto";
 import { AuthPrismaService } from "./auth-prisma.service";
 import { PasswordService } from "./password.service";
 import { AuthAuditService } from "./auth-audit.service";
+import { AnalyticsService } from "../analytics/analytics.service";
 
 @Injectable()
 export class AuthService {
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly passwords: PasswordService,
     private readonly audit: AuthAuditService,
+    private readonly analytics: AnalyticsService,
   ) {}
 
   // =====================================================================
@@ -50,6 +52,7 @@ export class AuthService {
           action: "LOGIN_FAILED",
           meta: { email, reason: "bad_password", ip: ctx?.ip },
         });
+        this.analytics.capture(user.id, "login_failed", { reason: "bad_password" }, user.gymId);
       }
       throw new UnauthorizedException("Invalid credentials");
     }
@@ -67,6 +70,10 @@ export class AuthService {
       action: "LOGIN_SUCCESS",
       meta: { ip: ctx?.ip, userAgent: ctx?.userAgent },
     });
+
+    this.analytics.identify(user.id, { role: user.role, gymId: user.gymId });
+    this.analytics.groupIdentify(user.gymId, { name: user.gym?.name });
+    this.analytics.capture(user.id, "user_logged_in", { role: user.role }, user.gymId);
 
     return {
       ...tokens,
@@ -184,6 +191,7 @@ export class AuthService {
         action: "LOGOUT",
         meta: { ip: ctx?.ip },
       });
+      this.analytics.capture(actor.id, "user_logged_out", {}, actor.gymId);
     }
     return { success: true };
   }
@@ -254,6 +262,10 @@ export class AuthService {
       });
       return { gym, user };
     });
+
+    this.analytics.identify(result.user.id, { role: "OWNER", gymId: result.gym.id });
+    this.analytics.groupIdentify(result.gym.id, { name: result.gym.name, createdAt: result.gym.createdAt });
+    this.analytics.capture(result.user.id, "gym_registered", {}, result.gym.id);
 
     return { gymId: result.gym.id, userId: result.user.id };
   }
