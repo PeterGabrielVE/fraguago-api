@@ -5,6 +5,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { HealthController } from './health.controller';
 import { AuthModule } from './auth/auth.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -85,6 +86,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     ExportsModule,         // CSV/Excel exports
     PaymentsModule,        // payment receipts + OCR
   ],
+  controllers: [HealthController],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },   // 1º: puebla req.user
     { provide: APP_GUARD, useClass: RolesGuard },      // 2º: usa req.user

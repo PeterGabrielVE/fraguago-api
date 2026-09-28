@@ -1,0 +1,59 @@
+# Blueprint de Render para el API (plan gratuito).
+# Render → New → Blueprint → elegir este repo. Guía: deploy/GESTIONADO.md
+services:
+  - type: web
+    name: fraguago-api
+    runtime: node
+    plan: free
+    # Elige la región más cercana a tu base de datos en Neon.
+    region: oregon
+    # --production=false: instala devDependencies (nest CLI, prisma) aunque
+    # NODE_ENV=production.
+    buildCommand: yarn install --frozen-lockfile --production=false && yarn prisma generate && yarn build
+    startCommand: npx prisma migrate deploy && node dist/main
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      # URL de la web en Vercel (p. ej. https://fraguago.vercel.app).
+      - key: FRONTEND_URL
+        sync: false
+      # Neon: conexiones DIRECTAS (host sin "-pooler"), con ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES_SEC
+        value: "900"
+      - key: JWT_REFRESH_EXPIRES_SEC
+        value: "604800"
+      - key: RETENTION_CRON_TZ
+        value: America/Caracas
+      - key: RETENTION_CRON_ENABLED
+        value: "true"
+      # Opcionales. Render gratis bloquea los puertos SMTP 25/465/587:
+      # usa el puerto 2525 (Brevo, Mailgun, SendGrid lo soportan).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "2525"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: POSTHOG_API_KEY
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
