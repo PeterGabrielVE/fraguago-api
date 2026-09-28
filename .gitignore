@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 .docker-compose.yml
+# Despliegue: secretos y backups locales del servidor
+deploy/backups/

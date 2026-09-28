@@ -1,0 +1,16 @@
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API NestJS. flush_interval -1: no bufferizar, necesario para los streams
+	# SSE en tiempo real (aforo, retos).
+	handle /api/* {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
+	}
+
+	# Todo lo demás es la web Next.js.
+	handle {
+		reverse_proxy web:3000
+	}
+}

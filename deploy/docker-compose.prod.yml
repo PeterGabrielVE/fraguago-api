@@ -1,0 +1,115 @@
+# Producción en un solo servidor (p. ej. VM Always Free de Oracle Cloud).
+# Estructura esperada en el servidor:
+#   ~/fraguago/fraguago-api   (este repo; este archivo en deploy/)
+#   ~/fraguago/fraguago-web
+# Uso (desde fraguago-api/deploy):
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Las variables salen de deploy/.env (ver .env.example).
+
+services:
+  # Proxy con HTTPS automático (Let's Encrypt). Único servicio expuesto.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?Define DOMAIN en deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+  web:
+    build:
+      context: ../../fraguago-web
+      target: runner
+      args:
+        # Se incrustan en el bundle al construir: cambiar DOMAIN exige rebuild.
+        NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
+        NEXT_PUBLIC_ENABLE_REGISTRATION: ${NEXT_PUBLIC_ENABLE_REGISTRATION:-false}
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://us.i.posthog.com}
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+    restart: unless-stopped
+    # Aplica migraciones pendientes antes de arrancar.
+    command: sh -c "npx prisma migrate deploy && node dist/main"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      FRONTEND_URL: https://${DOMAIN}
+      DATABASE_URL: postgresql://fraguago:${APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      AUTH_DATABASE_URL: postgresql://fraguago_auth:${AUTH_DB_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-fraguago}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Define APP_DB_PASSWORD en deploy/.env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?Define AUTH_DB_PASSWORD en deploy/.env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Crea los roles fraguago / fraguago_auth (solo en el primer arranque).
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-fraguago}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Backup diario con pg_dump; conserva los últimos BACKUP_KEEP_DAYS días.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-fraguago}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      sh -c 'while true; do
+        f=/backups/fraguago-$$(date +%Y%m%d-%H%M).dump;
+        pg_dump -Fc -f "$$f" && echo "backup ok: $$f" || echo "backup FALLÓ";
+        find /backups -name "fraguago-*.dump" -mtime +$$BACKUP_KEEP_DAYS -delete;
+        sleep 86400;
+      done'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
