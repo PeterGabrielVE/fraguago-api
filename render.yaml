@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: free
     # Elige la región más cercana a tu base de datos en Neon.
-    region: oregon
+    region: ohio
     # --production=false: instala devDependencies (nest CLI, prisma) aunque
     # NODE_ENV=production.
     buildCommand: yarn install --frozen-lockfile --production=false && yarn prisma generate && yarn build
