@@ -70,6 +70,19 @@ export class PortalService {
     return this.attendanceService.checkIn(gymId, memberId);
   }
 
+  async checkOut(gymId: string, userId: string) {
+    const memberId = await this.resolveMemberId(gymId, userId);
+    return this.attendanceService.checkOutMember(gymId, memberId);
+  }
+
+  getOccupancy(gymId: string) {
+    return this.attendanceService.occupancy(gymId);
+  }
+
+  streamOccupancy(gymId: string) {
+    return this.attendanceService.occupancyStream(gymId);
+  }
+
   // RoutinesService.findByMember (ROUT-B06) ya existía pero no estaba
   // expuesto por ningún controller; se expone acá por primera vez.
   // completedToday indica si el socio ya la marcó como hecha hoy (COM-B03).

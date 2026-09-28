@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditInterceptor } from './common/audit.interceptor';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -49,6 +50,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    RedisModule,         // global: pub/sub de eventos en tiempo real (Redis o memoria)
     AnalyticsModule,     // global: PostHog (no-op sin POSTHOG_API_KEY)
     AuthModule,
     LogsModule,          // global: exposes LogsService to the interceptor

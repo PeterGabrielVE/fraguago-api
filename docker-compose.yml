@@ -10,11 +10,16 @@ services:
       - "${PORT:-3001}:3001"
     env_file:
       - .env
+    environment:
+      # Pub/sub de eventos en tiempo real (aforo, retos) entre instancias.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
     volumes:
       - .:/app
       - /app/node_modules
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - fraguago-network
@@ -33,6 +38,20 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
+      retries: 10
+    networks:
+      - fraguago-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: fraguago-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 10
     networks:
       - fraguago-network

@@ -74,6 +74,22 @@ export class PortalController {
     return this.service.checkIn(gymId, user.id);
   }
 
+  @Post('check-out')
+  checkOut(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.checkOut(gymId, user.id);
+  }
+
+  // Aforo del gimnasio para saber si está lleno antes de ir.
+  @Get('occupancy')
+  getOccupancy(@GymId() gymId: string) {
+    return this.service.getOccupancy(gymId);
+  }
+
+  @Sse('occupancy/stream')
+  streamOccupancy(@GymId() gymId: string): Observable<MessageEvent> {
+    return this.service.streamOccupancy(gymId);
+  }
+
   @Get('routine')
   getRoutine(@GymId() gymId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.service.getRoutine(gymId, user.id);

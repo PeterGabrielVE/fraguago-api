@@ -83,6 +83,27 @@ export class FinancesService {
     }
   }
 
+  // El concepto debe ser del mismo tipo que el movimiento (ingreso/egreso).
+  private async assertConceptMatches(
+    client: Pick<FinanceTx, 'concept'>,
+    gymId: string,
+    conceptId: string | null | undefined,
+    type: TransactionType,
+  ) {
+    if (!conceptId) return;
+    const concept = await client.concept.findFirst({
+      where: { id: conceptId, gymId },
+      select: { kind: true, name: true },
+    });
+    if (!concept) throw new BadRequestException('El concepto no existe');
+    if (concept.kind !== type) {
+      const label = concept.kind === 'INCOME' ? 'ingreso' : 'egreso';
+      throw new BadRequestException(
+        `El concepto "${concept.name}" es de ${label} y no coincide con el tipo del registro`,
+      );
+    }
+  }
+
   // `tx` opcional: permite registrar el ingreso dentro de una transacción
   // mayor (venta, membresía, importación): todo o nada.
   async create(
@@ -101,6 +122,7 @@ export class FinancesService {
 
     const run = async (client: FinanceTx) => {
       await this.assertReferenceFree(client, gymId, payment);
+      await this.assertConceptMatches(client, gymId, dto.conceptId, dto.type);
       let created;
       try {
         created = await client.transaction.create({
@@ -209,6 +231,15 @@ export class FinancesService {
     // crear el pago (receiptId no aplica en la edición).
     const { receiptId: _receiptId, ...rest } = dto;
     const data: Prisma.TransactionUpdateInput = { ...rest };
+
+    if (dto.conceptId !== undefined || dto.type !== undefined) {
+      await this.assertConceptMatches(
+        this.prisma,
+        gymId,
+        dto.conceptId !== undefined ? dto.conceptId : current.conceptId,
+        dto.type ?? current.type,
+      );
+    }
 
     // Si cambian los datos del pago, se normalizan y se revalida la referencia.
     const paymentKeys = ['paymentMethod', 'paymentReference', 'paymentBank', 'payerPhone', 'payerName'] as const;

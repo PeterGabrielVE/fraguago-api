@@ -3,11 +3,15 @@ import {
   Body,
   Controller,
   Get,
+  MessageEvent,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
+  Sse,
   UseGuards,
 } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { AttendanceService } from './attendance.service';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/roles.guard';
@@ -72,6 +76,26 @@ export class AttendanceController {
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   summary(@GymId() gymId: string) {
     return this.service.summary(gymId);
+  }
+
+  // Aforo actual con la lista de quién está dentro.
+  @Get('occupancy')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  occupancy(@GymId() gymId: string) {
+    return this.service.occupancyDetail(gymId);
+  }
+
+  // Avisos en tiempo real de cambios en el aforo (entradas/salidas).
+  @Sse('occupancy/stream')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  occupancyStream(@GymId() gymId: string): Observable<MessageEvent> {
+    return this.service.occupancyStream(gymId);
+  }
+
+  @Post(':id/check-out')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  checkOut(@GymId() gymId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.checkOut(gymId, id);
   }
 
   // B04 — GET /attendance/member/:memberId (paramétrica, va al final)

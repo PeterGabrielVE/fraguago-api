@@ -88,7 +88,7 @@ enum MembershipType {
 // iniciar" NO se guardan: se derivan de startDate/endDate (así nunca quedan
 // desactualizados sin un cron).
 enum MembershipStatus {
-  ACTIVE    // vigente según sus fechas
+  ACTIVE // vigente según sus fechas
   SUSPENDED // congelada por el staff (lesión, viaje…): no permite check-in
   CANCELLED // anulada: no cuenta como membresía
 }
@@ -133,7 +133,7 @@ enum MessageChannel {
 
 // Evento que dispara un mensaje automático (RET-B02 / RET-B03).
 enum AutomationTrigger {
-  INACTIVITY          // socio con membresía vigente que dejó de venir
+  INACTIVITY // socio con membresía vigente que dejó de venir
   MEMBERSHIP_EXPIRING // membresía que vence en los próximos N días
 }
 
@@ -144,14 +144,14 @@ enum MessageStatus {
 }
 
 enum ReferralStatus {
-  PENDING  // registrado; el referido todavía no tiene membresía
+  PENDING // registrado; el referido todavía no tiene membresía
   REWARDED // el referido activó su primera membresía y se pagó el premio
 }
 
 // Qué se importa desde Excel/CSV (MIG-B01).
 enum ImportType {
   MEMBERS_PAYMENTS // socios + último pago (hoja "Control de Pagos")
-  ATTENDANCE       // cuadrícula de asistencia diaria (Día 1..31)
+  ATTENDANCE // cuadrícula de asistencia diaria (Día 1..31)
 }
 
 enum ImportStatus {
@@ -162,8 +162,8 @@ enum ImportStatus {
 
 // Qué mide el progreso de un reto (siempre dentro de su ventana de fechas).
 enum ChallengeMetric {
-  ATTENDANCE_COUNT    // check-ins totales
-  ATTENDANCE_DAYS     // días distintos con asistencia
+  ATTENDANCE_COUNT // check-ins totales
+  ATTENDANCE_DAYS // días distintos con asistencia
   ROUTINE_COMPLETIONS // rutinas marcadas como completadas
 }
 
@@ -193,12 +193,17 @@ enum RedemptionStatus {
 // =====================================================================
 
 model Gym {
-  id        String   @id @default(uuid())
-  name      String
+  id              String   @id @default(uuid())
+  name            String
   // Moneda de referencia para reportes/totales; los pagos en otra moneda se
   // convierten a esta usando la tasa vigente al momento del pago.
-  baseCurrency Currency @default(USD)
-  createdAt DateTime @default(now())
+  baseCurrency    Currency @default(USD)
+  // Aforo: máximo de personas simultáneas (null = sin límite) y duración
+  // promedio de una visita, usada para dar por finalizadas las entradas a las
+  // que nunca se les marcó salida.
+  maxCapacity     Int?
+  avgVisitMinutes Int      @default(90)
+  createdAt       DateTime @default(now())
 
   users    User[]
   profiles Profile[]
@@ -219,11 +224,11 @@ model Gym {
   auditLogs   AuditLog[]
   attendances Attendance[]
 
-  products Product[]
-  sales     Sale[]  
-  saleItems SaleItem[]
+  products       Product[]
+  sales          Sale[]
+  saleItems      SaleItem[]
   stockMovements StockMovement[]
-  measurements Measurement[]
+  measurements   Measurement[]
 
   emergencyContacts EmergencyContact[]
   medicalProfiles   MedicalProfile[]
@@ -278,13 +283,13 @@ model User {
   passwordHash String
   role         Role
 
-  gym       Gym        @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  profile   Profile?
-  member    Member?
-  trainer   Trainer?
-  auditLogs AuditLog[]
+  gym           Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  profile       Profile?
+  member        Member?
+  trainer       Trainer?
+  auditLogs     AuditLog[]
   refreshTokens RefreshToken[]
-  salesCreated  Sale[] @relation("SaleCreatedBy")
+  salesCreated  Sale[]         @relation("SaleCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -317,7 +322,7 @@ model RefreshToken {
   id     String @id @default(uuid())
   userId String
 
-  tokenHash String   // SHA-256 of the raw refresh token — never the plain token
+  tokenHash String // SHA-256 of the raw refresh token — never the plain token
   expiresAt DateTime
   revoked   Boolean  @default(false)
 
@@ -326,7 +331,7 @@ model RefreshToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([tokenHash])   // el /auth/refresh busca por este hash
+  @@index([tokenHash]) // el /auth/refresh busca por este hash
 }
 
 // =====================================================================
@@ -350,12 +355,12 @@ model Profile {
   userId String @unique
   gymId  String
 
-  firstName String
-  lastName  String
-  phone     String?
-  address   String?
+  firstName     String
+  lastName      String
+  phone         String?
+  address       String?
   preferredTime String?
-  avatarUrl String?
+  avatarUrl     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   gym  Gym  @relation(fields: [gymId], references: [id], onDelete: Cascade)
@@ -426,7 +431,7 @@ model Member {
   routines     Routine[]
   transactions Transaction[]
   attendances  Attendance[]
-  sales      Sale[]
+  sales        Sale[]
   measurements Measurement[]
 
   pointsTransactions PointsTransaction[]
@@ -437,8 +442,8 @@ model Member {
   routineLogs             RoutineLog[]
 
   messageLogs   MessageLog[]
-  referralsMade Referral[]  @relation("ReferralReferrer")
-  referredBy    Referral?   @relation("ReferralReferred")
+  referralsMade Referral[]   @relation("ReferralReferrer")
+  referredBy    Referral?    @relation("ReferralReferred")
 
   @@unique([gymId, identificationNumber])
   @@unique([gymId, referralCode])
@@ -603,8 +608,8 @@ model Trainer {
   gymId  String
   userId String @unique
 
-  specialty             String?
-  identificationNumber  String?
+  specialty            String?
+  identificationNumber String?
 
   createdAt DateTime @default(now())
 
@@ -696,8 +701,8 @@ model Transaction {
   // se recalcula después aunque cambie la tasa). amountBase = amount cuando
   // currency ya es la moneda base.
   currency      Currency       @default(USD)
-  exchangeRate  Decimal        @db.Decimal(12, 6) @default(1)
-  amountBase    Decimal        @db.Decimal(10, 2) @default(0)
+  exchangeRate  Decimal        @default(1) @db.Decimal(12, 6)
+  amountBase    Decimal        @default(0) @db.Decimal(10, 2)
   paymentMethod PaymentMethod?
   note          String?
   date          DateTime       @default(now())
@@ -717,10 +722,10 @@ model Transaction {
 
   createdAt DateTime @default(now())
 
-  gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
-  concept Concept? @relation(fields: [conceptId], references: [id], onDelete: SetNull)
-  member  Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
-  sale    Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  gym     Gym             @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  concept Concept?        @relation(fields: [conceptId], references: [id], onDelete: SetNull)
+  member  Member?         @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  sale    Sale?           @relation(fields: [saleId], references: [id], onDelete: SetNull)
   receipt PaymentReceipt?
 
   @@index([gymId])
@@ -849,10 +854,11 @@ model Attendance {
   gymId    String
   memberId String
 
-  checkedInAt DateTime        @default(now())
-  shift       AttendanceShift
-  passType    MembershipType?
-  signature   String?
+  checkedInAt  DateTime        @default(now())
+  checkedOutAt DateTime?
+  shift        AttendanceShift
+  passType     MembershipType?
+  signature    String?
 
   gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
   member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -878,7 +884,7 @@ model Product {
 
   createdAt DateTime @default(now())
 
-  gym   Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  gym            Gym             @relation(fields: [gymId], references: [id], onDelete: Cascade)
   saleItems      SaleItem[]
   stockMovements StockMovement[]
 
@@ -893,14 +899,14 @@ model Product {
 model Sale {
   id       String  @id @default(uuid())
   gymId    String
-  memberId String?  // opcional: venta a un socio o a público general
+  memberId String? // opcional: venta a un socio o a público general
 
-  total Decimal @db.Decimal(10, 2) // suma de todos los items
+  total         Decimal        @db.Decimal(10, 2) // suma de todos los items
   // Moneda de `total` (la de los productos: una venta no mezcla monedas).
   currency      Currency       @default(USD)
   paymentMethod PaymentMethod?
 
-  createdById String?  // user que registró la venta
+  createdById String? // user que registró la venta
   soldAt      DateTime @default(now())
   createdAt   DateTime @default(now())
 
@@ -970,7 +976,6 @@ model Measurement {
   @@index([gymId, memberId, date])
 }
 
-
 // =====================================================================
 // STOCK MOVEMENTS
 // =====================================================================
@@ -984,10 +989,10 @@ model StockMovement {
   id    String @id @default(uuid())
   gymId String
 
-  productId String
-  change    Int     // +entrada / -salida
+  productId      String
+  change         Int // +entrada / -salida
   resultingStock Int // stock del producto DESPUÉS del movimiento
-  reason    String?
+  reason         String?
 
   createdById String? // user que hizo el ajuste
   createdAt   DateTime @default(now())
@@ -999,7 +1004,6 @@ model StockMovement {
   @@index([productId])
   @@index([gymId, createdAt])
 }
-
 
 // =====================================================================
 // GAMIFICATION — TIERS (niveles)
@@ -1158,7 +1162,6 @@ model RewardRedemption {
   @@index([gymId, status])
 }
 
-
 // =====================================================================
 // COMMUNITY — ROUTINE LOGS
 // =====================================================================
@@ -1211,7 +1214,7 @@ model Challenge {
   startsAt        DateTime
   endsAt          DateTime
   pointsReward    Int             @default(0)
-  maxParticipants Int?            // null = sin cupo
+  maxParticipants Int? // null = sin cupo
   active          Boolean         @default(true)
 
   createdById String?
@@ -1417,10 +1420,10 @@ model RoutineExercise {
   routineId  String
   exerciseId String
 
-  day         Int     // 1..7 (día de la rutina, no día de la semana)
-  order       Int     // posición dentro del día
+  day         Int // 1..7 (día de la rutina, no día de la semana)
+  order       Int // posición dentro del día
   sets        Int
-  reps        String  // "10-12", "30s", "al fallo"…
+  reps        String // "10-12", "30s", "al fallo"…
   restSeconds Int?
   notes       String?
 
