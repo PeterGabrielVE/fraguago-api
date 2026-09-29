@@ -10,9 +10,14 @@ import { AttendanceShift, Prisma, MembershipStatus } from "@prisma/client";
 import { GamificationService } from "../gamification/gamification.service";
 import { ATTENDANCE_METRICS, ChallengesService } from "../challenges/challenges.service";
 import { OccupancyEventsService } from "./occupancy-events.service";
+import { tenantContext } from "../../common/tenant/tenant.context";
 
 // Desde este porcentaje del aforo se considera "concurrido".
 const BUSY_THRESHOLD = 0.7;
+
+// En la pantalla pública, un segundo check-in dentro de esta ventana se toma
+// como el mismo (doble toque) y no crea otra entrada.
+const PUBLIC_DUPLICATE_WINDOW_MS = 10 * 60_000;
 
 export type OccupancyStatus = "UNLIMITED" | "AVAILABLE" | "BUSY" | "FULL";
 
@@ -279,5 +284,71 @@ export class AttendanceService {
 
   occupancyStream(gymId: string) {
     return this.occupancyEvents.stream(gymId);
+  }
+
+  // --- Pantalla pública de asistencia (sin sesión) ---
+  //
+  // Una ruta pública no trae JWT, así que el TenantInterceptor no abre
+  // contexto y RLS devolvería 0 filas. Abrimos el contexto con el gymId de la
+  // URL: RLS sigue limitando todo a ese gym.
+
+  // GET /public/attendance/:gymId — solo el nombre, para el encabezado.
+  publicGym(gymId: string) {
+    return tenantContext.run({ gymId }, async () => {
+      const gym = await this.prisma.gym.findUnique({
+        where: { id: gymId },
+        select: { name: true },
+      });
+      if (!gym) throw new NotFoundException("Gimnasio no encontrado");
+      return gym;
+    });
+  }
+
+  // POST /public/attendance/:gymId/check-in — el socio marca su entrada con
+  // su número de identificación. Devuelve lo mínimo (nombre de pila) para no
+  // exponer datos del socio a quien pruebe números al azar.
+  publicCheckIn(gymId: string, identificationNumber: string) {
+    return tenantContext.run({ gymId }, async () => {
+      const member = await this.prisma.member.findFirst({
+        where: { gymId, identificationNumber },
+        select: {
+          id: true,
+          user: { select: { profile: { select: { firstName: true } } } },
+        },
+      });
+      if (!member) {
+        throw new NotFoundException(
+          "No encontramos un socio con ese número de identificación.",
+        );
+      }
+      const firstName = member.user?.profile?.firstName ?? null;
+
+      // Evita duplicar la entrada por un doble toque en el kiosko.
+      const recent = await this.prisma.attendance.findFirst({
+        where: {
+          gymId,
+          memberId: member.id,
+          checkedOutAt: null,
+          checkedInAt: { gte: new Date(Date.now() - PUBLIC_DUPLICATE_WINDOW_MS) },
+        },
+        orderBy: { checkedInAt: "desc" },
+      });
+      if (recent) {
+        return {
+          firstName,
+          checkedInAt: recent.checkedInAt,
+          alreadyCheckedIn: true,
+          pointsAwarded: 0,
+        };
+      }
+
+      const attendance = await this.checkIn(gymId, member.id);
+      return {
+        firstName,
+        checkedInAt: attendance.checkedInAt,
+        alreadyCheckedIn: false,
+        pointsAwarded: attendance.gamification.pointsAwarded,
+      };
+    });
   }
 }

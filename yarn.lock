@@ -263,6 +263,11 @@
     jsonc-parser "3.3.1"
     pluralize "8.0.0"
 
+"@nestjs/throttler@^6.7.1":
+  version "6.7.1"
+  resolved "https://registry.yarnpkg.com/@nestjs/throttler/-/throttler-6.7.1.tgz#89727fd22d91bd8a070938fe4cfc4bc204322a92"
+  integrity sha512-gAyY1AkU+cSK5DCjFOB43xax9oakameH4xZa9kAgqBqSBQZgmv3DZylLV8KyZNzOGhceL3kDVtby+CF8VAdmEA==
+
 "@nuxtjs/opencollective@0.3.2":
   version "0.3.2"
   resolved "https://registry.npmjs.org/@nuxtjs/opencollective/-/opencollective-0.3.2.tgz"
