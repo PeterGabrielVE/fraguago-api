@@ -59,14 +59,28 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 //  - Pago móvil: la referencia son solo dígitos (los bancos la muestran con
 //    espacios o guiones); 4 a 20 dígitos.
 //  - Transferencia / Zelle / tarjeta / otro: alfanumérica en mayúsculas.
-//  - Efectivo: no lleva referencia ni banco.
+//  - Efectivo: sin banco ni teléfono; la referencia (opcional) es el serial
+//    de los billetes, en mayúsculas y separados por coma si son varios
+//    ("PB12345678A, L87654321B"). Como la referencia es única por método, un
+//    serial repetido se rechaza: alerta de billete falso o pago contado dos veces.
 export function normalizePayment(input: PaymentFieldsDto): NormalizedPayment {
   const method = input.paymentMethod;
   const clean = (s?: string) => s?.replace(/\s+/g, ' ').trim() || undefined;
   let reference = clean(input.paymentReference);
 
   if (method === PaymentMethod.CASH) {
-    return { paymentMethod: method };
+    const serials = (reference ?? '')
+      .split(/[,;\n]+/)
+      .map((serial) => serial.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+      .filter(Boolean);
+    if (serials.some((serial) => serial.length < 4)) {
+      throw new BadRequestException('Cada serial de billete debe tener al menos 4 caracteres');
+    }
+    return {
+      paymentMethod: method,
+      paymentReference: serials.length ? serials.join(', ') : undefined,
+      payerName: clean(input.payerName),
+    };
   }
 
   if (reference) {

@@ -26,6 +26,20 @@ export class ExchangeRatesController {
     return this.service.latest(gymId);
   }
 
+  // Tasa oficial del BCV en este momento (convertida a la moneda base del gym), sin guardarla.
+  @Get('bcv')
+  @Roles(Role.OWNER, Role.ADMIN, Role.STAFF)
+  bcv(@GymId() gymId: string) {
+    return this.service.bcvPreview(gymId);
+  }
+
+  // "Actualizar desde BCV": guarda la tasa oficial si cambió. 503 si el servicio está caído.
+  @Post('bcv/sync')
+  @Roles(Role.OWNER, Role.ADMIN, Role.STAFF)
+  syncBcv(@GymId() gymId: string) {
+    return this.service.syncFromBcv(gymId, true);
+  }
+
   @Get()
   @Roles(Role.OWNER, Role.ADMIN, Role.STAFF)
   findAll(

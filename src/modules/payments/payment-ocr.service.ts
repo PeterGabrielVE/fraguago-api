@@ -1,12 +1,16 @@
 import {
   Injectable,
   Logger,
+  OnModuleDestroy,
   ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { GoogleGenAI, Type } from '@google/genai';
+import { dirname, join } from 'path';
+import sharp from 'sharp';
+import { createWorker, OEM, PSM, type Worker } from 'tesseract.js';
+import { parseReceiptText, type OcrMethod } from './receipt-parser';
 
-export type OcrMethod = 'PAGO_MOVIL' | 'TRANSFER' | 'ZELLE' | 'CARD' | 'CASH' | 'OTHER';
+export type { OcrMethod } from './receipt-parser';
 
 export type PaymentOcrResult = {
   isPaymentReceipt: boolean;
@@ -18,125 +22,96 @@ export type PaymentOcrResult = {
   payerPhone: string | null;
   payerName: string | null;
   date: string | null; // YYYY-MM-DD
-  confidence: number;  // 0..1, estimada por el modelo
+  confidence: number;  // 0..1
 };
 
 const OCR_TIMEOUT_MS = 25_000;
 
-const SYSTEM = [
-  'Extraes datos de comprobantes de pago de Venezuela (capturas de pago móvil,',
-  'transferencias bancarias, Zelle, vouchers de punto de venta). Devuelves SOLO',
-  'lo que ves escrito en la imagen: si un dato no aparece, usa null; nunca lo',
-  'inventes. La referencia es el número de operación/referencia/confirmación',
-  '(no el teléfono ni la cédula). "bank" es el banco EMISOR (desde donde se',
-  'pagó, suele ser el del logo o encabezado), nunca el banco destino.',
-  '"payerPhone" es el teléfono de ORIGEN/emisor, nunca el de destino.',
-  'Montos en Bs usan coma decimal (1.234,56 = 1234.56). Si la imagen no es un',
-  'comprobante de pago, isPaymentReceipt=false.',
-].join(' ');
+// Modelo de español incluido en el paquete @tesseract.js-data/spa: se lee del
+// disco, sin descargar nada de internet (funciona sin conexión). Lee también
+// el texto en inglés de Zelle/PayPal (mismo alfabeto).
+const LANG_PATH = join(dirname(require.resolve('@tesseract.js-data/spa/package.json')), '4.0.0_best_int');
 
-const SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    isPaymentReceipt: { type: Type.BOOLEAN },
-    paymentMethod: { type: Type.STRING, nullable: true, enum: ['PAGO_MOVIL', 'TRANSFER', 'ZELLE', 'CARD', 'CASH', 'OTHER'] },
-    reference: { type: Type.STRING, nullable: true },
-    amount: { type: Type.NUMBER, nullable: true },
-    currency: { type: Type.STRING, nullable: true, enum: ['VES', 'USD', 'EUR'] },
-    bank: { type: Type.STRING, nullable: true },
-    payerPhone: { type: Type.STRING, nullable: true },
-    payerName: { type: Type.STRING, nullable: true },
-    date: { type: Type.STRING, nullable: true, description: 'Fecha del pago en formato YYYY-MM-DD' },
-    confidence: { type: Type.NUMBER, description: 'Qué tan legible y seguro es lo extraído, de 0 a 1' },
-  },
-  required: ['isPaymentReceipt', 'confidence'],
-};
-
-// OCR de comprobantes con Gemini (ya configurado para las rutinas con IA).
-// Lee la captura y devuelve los campos para AUTOCOMPLETAR el formulario: el
-// staff siempre revisa antes de guardar. La imagen no se almacena aquí.
+// OCR de comprobantes SIN IA: sharp prepara la imagen, Tesseract (tesseract.js,
+// WebAssembly, local) extrae el texto y receipt-parser lo interpreta con reglas
+// (etiquetas de los bancos venezolanos, formatos de montos, teléfonos y fechas).
+// Devuelve los campos para AUTOCOMPLETAR el formulario: el staff siempre revisa
+// antes de guardar. La imagen no se almacena aquí.
 @Injectable()
-export class PaymentOcrService {
+export class PaymentOcrService implements OnModuleDestroy {
   private readonly logger = new Logger(PaymentOcrService.name);
-  private readonly client: GoogleGenAI | null;
-  private readonly model = process.env.GEMINI_MODEL ?? 'gemini-flash-latest';
+  private worker: Promise<Worker> | null = null;
+  // Tesseract procesa una imagen a la vez por worker: las lecturas se encolan.
+  private queue: Promise<unknown> = Promise.resolve();
 
-  constructor() {
-    this.client = process.env.GEMINI_API_KEY
-      ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { timeout: OCR_TIMEOUT_MS } })
-      : null;
-  }
-
-  get isConfigured() {
-    return this.client !== null;
-  }
-
-  async extract(buffer: Buffer, mimeType: string): Promise<PaymentOcrResult> {
-    if (!this.client) {
-      throw new ServiceUnavailableException('La lectura automática de comprobantes no está configurada (GEMINI_API_KEY)');
+  // El worker (~5 MB de modelos) se crea con la primera lectura y se reutiliza.
+  private getWorker() {
+    if (!this.worker) {
+      this.worker = (async () => {
+        const worker = await createWorker('spa', OEM.LSTM_ONLY, { langPath: LANG_PATH, gzip: true, cacheMethod: 'none' });
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO, preserve_interword_spaces: '1' });
+        return worker;
+      })();
+      this.worker.catch(() => { this.worker = null; });
     }
-    let raw: Partial<PaymentOcrResult>;
+    return this.worker;
+  }
+
+  async onModuleDestroy() {
+    if (this.worker) await (await this.worker).terminate().catch(() => undefined);
+  }
+
+  async extract(buffer: Buffer, _mimeType: string): Promise<PaymentOcrResult> {
+    let text: string;
+    let ocrConfidence: number;
     try {
-      const res = await this.client.models.generateContent({
-        model: this.model,
-        contents: [{
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType, data: buffer.toString('base64') } },
-            { text: 'Extrae los datos de este comprobante de pago.' },
-          ],
-        }],
-        config: { systemInstruction: SYSTEM, responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 0 },
+      const image = await this.prepare(buffer);
+      const run = this.queue.then(async () => {
+        const worker = await this.getWorker();
+        return worker.recognize(image);
       });
-      raw = JSON.parse(res.text ?? '{}');
+      this.queue = run.catch(() => undefined);
+      const { data } = await withTimeout(run, OCR_TIMEOUT_MS);
+      text = data.text;
+      ocrConfidence = data.confidence / 100;
     } catch (err: any) {
-      this.logger.error(`OCR falló: ${err?.status ?? ''} ${err?.message ?? err}`);
-      throw new ServiceUnavailableException(
-        err?.status === 429 || err?.status === 503
-          ? 'El servicio de lectura está saturado. Intenta de nuevo en unos segundos o completa los datos a mano.'
-          : 'No se pudo leer el comprobante. Completa los datos a mano.',
-      );
+      this.logger.error(`OCR falló: ${err?.message ?? err}`);
+      throw new ServiceUnavailableException('No se pudo leer el comprobante. Completa los datos a mano.');
     }
-    const result = this.sanitize(raw);
-    if (!result.isPaymentReceipt) {
-      throw new UnprocessableEntityException('La imagen no parece un comprobante de pago');
+
+    const parsed = parseReceiptText(text);
+    if (!parsed.isPaymentReceipt) {
+      throw new UnprocessableEntityException('La imagen no parece un comprobante de pago o no se lee bien. Completa los datos a mano.');
     }
-    return result;
-  }
-
-  // Nunca se confía ciegamente en la salida del modelo: se normaliza y se
-  // descarta lo que no tenga forma válida.
-  private sanitize(raw: Partial<PaymentOcrResult>): PaymentOcrResult {
-    const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
-    const methods: OcrMethod[] = ['PAGO_MOVIL', 'TRANSFER', 'ZELLE', 'CARD', 'CASH', 'OTHER'];
-    const method = methods.includes(raw.paymentMethod as OcrMethod) ? (raw.paymentMethod as OcrMethod) : null;
-
-    let reference = text(raw.reference, 40);
-    if (reference) {
-      reference = method === 'PAGO_MOVIL' ? reference.replace(/\D/g, '') : reference.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (reference.length < 4) reference = null;
-    }
-    const amount = typeof raw.amount === 'number' && Number.isFinite(raw.amount) && raw.amount > 0
-      ? Math.round(raw.amount * 100) / 100
-      : null;
-    const currency = ['VES', 'USD', 'EUR'].includes(raw.currency as string) ? (raw.currency as PaymentOcrResult['currency']) : null;
-    const date = typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) && !Number.isNaN(Date.parse(raw.date))
-      ? raw.date
-      : null;
-    const phone = text(raw.payerPhone, 20)?.replace(/[^\d+]/g, '') || null;
-    const confidence = typeof raw.confidence === 'number' ? Math.min(1, Math.max(0, raw.confidence)) : 0;
-
+    const { completeness, ...fields } = parsed;
     return {
-      isPaymentReceipt: raw.isPaymentReceipt !== false,
-      paymentMethod: method,
-      reference,
-      amount,
-      currency,
-      bank: text(raw.bank, 60),
-      payerPhone: phone && phone.replace(/\D/g, '').length >= 7 ? phone : null,
-      payerName: text(raw.payerName, 100),
-      date,
-      confidence,
+      ...fields,
+      // Qué tan legible fue la imagen × cuántos datos clave se reconocieron.
+      confidence: Math.round(Math.min(1, Math.max(0, ocrConfidence * (0.4 + 0.6 * completeness))) * 100) / 100,
     };
   }
+
+  // Tesseract lee mejor texto oscuro sobre fondo claro, en gris y con buena
+  // resolución: se corrige la orientación (EXIF), se escala a ~1600 px de
+  // ancho, se invierte si la captura es en modo oscuro y se realza el contraste.
+  private async prepare(buffer: Buffer): Promise<Buffer> {
+    const base = sharp(buffer, { failOn: 'none' }).rotate();
+    const { width = 0 } = await base.metadata();
+    let pipeline = base
+      .resize({ width: Math.min(Math.max(width, 1600), 2400), withoutEnlargement: false })
+      .grayscale();
+    const { channels } = await pipeline.clone().stats();
+    if (channels[0].mean < 110) pipeline = pipeline.negate({ alpha: false });
+    return pipeline.normalise().sharpen().png().toBuffer();
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`OCR tardó más de ${ms / 1000}s`)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
 }
