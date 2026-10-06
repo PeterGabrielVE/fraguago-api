@@ -1,5 +1,7 @@
 import { Currency } from '@prisma/client';
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { SLUG_MAX_LENGTH, SLUG_PATTERN } from '../../../common/slug';
 
 export class UpdateGymDto {
   @IsString()
@@ -22,4 +24,14 @@ export class UpdateGymDto {
   @Min(10)
   @Max(720)
   avgVisitMinutes?: number;
+
+  // Nombre corto del enlace público (/registro/<slug>). Cambiarlo invalida
+  // los enlaces ya compartidos.
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @IsString()
+  @MinLength(3)
+  @MaxLength(SLUG_MAX_LENGTH)
+  @Matches(SLUG_PATTERN, { message: 'El enlace solo puede tener letras minúsculas, números y guiones (ej. mi-gym).' })
+  slug?: string;
 }

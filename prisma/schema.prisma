@@ -195,6 +195,9 @@ enum RedemptionStatus {
 model Gym {
   id              String   @id @default(uuid())
   name            String
+  // Nombre corto para los enlaces públicos (/registro/<slug>). Único global:
+  // es lo que identifica al gym sin exponer su id.
+  slug            String   @unique
   // Moneda de referencia para reportes/totales; los pagos en otra moneda se
   // convierten a esta usando la tasa vigente al momento del pago.
   baseCurrency    Currency @default(USD)

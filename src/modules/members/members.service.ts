@@ -6,17 +6,24 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { randomBytes } from "crypto";
+import { findPublicGym } from "../../common/public-gym";
 import { ScopedPrismaClient, TENANT_PRISMA } from "../../prisma/prisma.service";
 import { PasswordService } from "../../auth/password.service";
 
 import { CreateMemberDto } from "./dto/create-member.dto";
 import { UpdateMemberDto } from "./dto/update-member.dto";
-import { MemberStatus, MembershipStatus } from "@prisma/client";
+import { MemberStatus, MembershipStatus, Prisma } from "@prisma/client";
 import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dto";
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 import { SearchMembersDto } from "./dto/search-members.dto";
+import { PublicRegisterMemberDto } from "./dto/public-register-member.dto";
+import { tenantContext } from "../../common/tenant/tenant.context";
 import { paginate } from "src/common/pagination";
+
+type Tx = Parameters<Parameters<ScopedPrismaClient["$transaction"]>[0] extends infer F
+  ? F extends (tx: any) => any ? F : never
+  : never>[0];
 
 function ageFrom(iso: string): number {
   const today = new Date();
@@ -104,47 +111,9 @@ export class MembersService {
     const rawPassword = dto.password ?? randomBytes(16).toString("hex");
     const passwordHash = await this.passwords.hash(rawPassword);
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          gymId,
-          email: dto.email,
-          passwordHash,
-          role: "MEMBER",
-          profile: {
-            create: {
-              firstName: dto.firstName,
-              lastName: dto.lastName,
-              phone: dto.phone,
-              address: dto.address,
-              preferredTime: dto.preferredTime,
-              gymId,
-            },
-          },
-        },
-      });
-
-      const member = await tx.member.create({
-        data: {
-          gymId,
-          userId: user.id,
-          identificationNumber: dto.identificationNumber,
-          birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
-          activityLevel: dto.activityLevel,
-          preferredShift: dto.preferredShift,
-          primaryGoal: dto.primaryGoal,
-          goalDescription: dto.goalDescription,
-          externalId: dto.externalId,
-        },
-        include: {
-          user: {
-            include: { profile: true },
-          },
-        },
-      });
-
-      return member;
-    });
+    const result = await this.prisma.$transaction((tx) =>
+      this.createUserAndMember(tx, gymId, dto, passwordHash),
+    );
 
     return {
       id: result.id,
@@ -157,6 +126,134 @@ export class MembersService {
       status: result.status,
       joinedAt: result.joinedAt,
     };
+  }
+
+  // User └── Profile └── Member dentro de una transacción ya abierta.
+  // Compartido por el alta del panel y el formulario público.
+  private async createUserAndMember(
+    tx: Tx,
+    gymId: string,
+    dto: Omit<CreateMemberDto, "password">,
+    passwordHash: string,
+  ) {
+    const user = await tx.user.create({
+      data: {
+        gymId,
+        email: dto.email,
+        passwordHash,
+        role: "MEMBER",
+        profile: {
+          create: {
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            phone: dto.phone,
+            address: dto.address,
+            preferredTime: dto.preferredTime,
+            gymId,
+          },
+        },
+      },
+    });
+
+    return tx.member.create({
+      data: {
+        gymId,
+        userId: user.id,
+        identificationNumber: dto.identificationNumber,
+        birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
+        activityLevel: dto.activityLevel,
+        preferredShift: dto.preferredShift,
+        primaryGoal: dto.primaryGoal,
+        goalDescription: dto.goalDescription,
+        externalId: dto.externalId,
+      },
+      include: {
+        user: {
+          include: { profile: true },
+        },
+      },
+    });
+  }
+
+  // ============================================================
+  // PUBLIC REGISTER  (formulario /registro/<gymId>)
+  // ============================================================
+  //
+  // El socio llena su propia ficha: datos personales, ficha médica y
+  // contacto de emergencia, todo en una transacción (o se guarda todo o
+  // nada). Corre en el tenant del gym de la URL, sin usuario autenticado.
+  // Devuelve solo el nombre de pila: nada que sirva para sondear datos.
+  // ============================================================
+
+  async publicGym(ref: string) {
+    const { name, slug } = await findPublicGym(this.prisma, ref);
+    return { name, slug };
+  }
+
+  async publicRegister(ref: string, dto: PublicRegisterMemberDto) {
+    const { id: gymId } = await findPublicGym(this.prisma, ref);
+
+    return tenantContext.run({ gymId }, async () => {
+      try {
+        await this.assertNoDuplicates(gymId, {
+          email: dto.email,
+          identificationNumber: dto.identificationNumber,
+        });
+      } catch (err) {
+        // Mensaje genérico: no confirmar a un anónimo si es el email o la
+        // cédula lo que ya existe.
+        if (err instanceof ConflictException) throw this.publicDuplicateError();
+        throw err;
+      }
+
+      const passwordHash = await this.passwords.hash(dto.password);
+      const { medicalProfile, emergencyContact, password: _, ...details } = dto;
+
+      try {
+        const member = await this.prisma.$transaction(async (tx) => {
+          const created = await this.createUserAndMember(tx, gymId, details, passwordHash);
+
+          if (medicalProfile) {
+            await tx.medicalProfile.create({
+              data: {
+                gymId,
+                memberId: created.id,
+                ...medicalProfile,
+                injuryDescription: medicalProfile.hasInjury
+                  ? (medicalProfile.injuryDescription ?? null)
+                  : null,
+                medicationDescription: medicalProfile.takesMedication
+                  ? (medicalProfile.medicationDescription ?? null)
+                  : null,
+              },
+            });
+          }
+
+          if (emergencyContact) {
+            await tx.emergencyContact.create({
+              data: { gymId, memberId: created.id, ...emergencyContact },
+            });
+          }
+
+          return created;
+        });
+
+        return { firstName: member.user.profile?.firstName ?? null };
+      } catch (err) {
+        // Dos envíos simultáneos con la misma cédula/email: el segundo choca
+        // con el índice único.
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          throw this.publicDuplicateError();
+        }
+        throw err;
+      }
+    });
+  }
+
+  private publicDuplicateError() {
+    return new ConflictException(
+      "Ya hay un socio registrado con esa cédula o correo. Si eres tú, pide ayuda en recepción.",
+    );
   }
 
   // ============================================================

@@ -5,7 +5,10 @@ services:
       dockerfile: Dockerfile
     container_name: fraguago-api
     restart: unless-stopped
-    command: npm run start:dev
+    # El volumen /app/node_modules sobrevive a los rebuilds y conserva el
+    # cliente de Prisma viejo: se regenera y se migra en cada arranque para
+    # que siempre coincida con schema.prisma.
+    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run start:dev"
     ports:
       - "${PORT:-3001}:3001"
     env_file:

@@ -11,6 +11,7 @@ import { GamificationService } from "../gamification/gamification.service";
 import { ATTENDANCE_METRICS, ChallengesService } from "../challenges/challenges.service";
 import { OccupancyEventsService } from "./occupancy-events.service";
 import { tenantContext } from "../../common/tenant/tenant.context";
+import { findPublicGym } from "../../common/public-gym";
 
 // Desde este porcentaje del aforo se considera "concurrido".
 const BUSY_THRESHOLD = 0.7;
@@ -292,19 +293,18 @@ export class AttendanceService {
   // contexto y RLS devolvería 0 filas. Abrimos el contexto con el gymId de la
   // URL: RLS sigue limitando todo a ese gym.
 
-  // GET /public/attendance/:gymId — solo el nombre, para el encabezado.
-  publicGym(gymId: string) {
-    return tenantContext.run({ gymId }, async () => {
-      const gym = await this.prisma.gym.findUnique({
-        where: { id: gymId },
-        select: { name: true },
-      });
-      if (!gym) throw new NotFoundException("Gimnasio no encontrado");
-      return gym;
-    });
+  // Gym de la URL pública (slug o id) → id real, para abrir el contexto.
+  resolvePublicGym(ref: string) {
+    return findPublicGym(this.prisma, ref);
   }
 
-  // POST /public/attendance/:gymId/check-in — el socio marca su entrada con
+  // GET /public/attendance/:slug — solo el nombre, para el encabezado.
+  async publicGym(ref: string) {
+    const { name, slug } = await findPublicGym(this.prisma, ref);
+    return { name, slug };
+  }
+
+  // POST /public/attendance/:slug/check-in (el controlador ya resolvió el id) — el socio marca su entrada con
   // su número de identificación. Devuelve lo mínimo (nombre de pila) para no
   // exponer datos del socio a quien pruebe números al azar.
   publicCheckIn(gymId: string, identificationNumber: string) {

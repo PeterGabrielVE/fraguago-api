@@ -83,13 +83,14 @@ En Render ve a **fraguago-api → Environment**, cambia `FRONTEND_URL` por la UR
 
 ## 5. Mantener despierto el API
 
-1. En <https://cron-job.org>, que es gratis, crea un job que haga `GET` cada **10 minutos** a:
+Ya viene resuelto con dos pings a `/api/health` cada **10 minutos**:
 
-   ```
-   https://fraguago-api.onrender.com/api/health
-   ```
+1. **Interno** (`src/keep-alive.job.ts`): el API se llama a sí mismo usando `RENDER_EXTERNAL_URL`, que Render define solo. No requiere configuración; se desactiva con `KEEP_ALIVE_ENABLED=false`.
+2. **Externo** (`.github/workflows/keep-alive.yml`): GitHub Actions hace el ping desde fuera, por si el servicio llegara a dormirse (el job interno no puede despertarlo). Si tu URL no es `https://fraguago-api.onrender.com`, créala en GitHub → **Settings → Secrets and variables → Actions → Variables** como `KEEP_ALIVE_URL`.
 
-2. Render da 750 h gratis al mes, suficientes para un servicio encendido todo el mes.
+Opcional: un tercer respaldo en <https://cron-job.org> (gratis) con un `GET` cada 10 minutos a `https://fraguago-api.onrender.com/api/health`.
+
+Render da 750 h gratis al mes, suficientes para un servicio encendido todo el mes.
 3. Así también corre el job diario de retención (mensajes automáticos) a las 9:00.
 
 ## 6. Crear el primer gimnasio

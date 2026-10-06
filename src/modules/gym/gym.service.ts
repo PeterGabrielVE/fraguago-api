@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { UpdateGymDto } from './dto/update-gym.dto';
 
@@ -21,7 +21,13 @@ export class GymService {
   }
 
   // GYM-B02
-  update(gymId: string, dto: UpdateGymDto) {
+  async update(gymId: string, dto: UpdateGymDto) {
+    if (dto.slug) {
+      const owner = await this.prisma.gym.findUnique({ where: { slug: dto.slug }, select: { id: true } });
+      if (owner && owner.id !== gymId) {
+        throw new ConflictException('Ese enlace ya lo usa otro gimnasio. Prueba con otro nombre.');
+      }
+    }
     return this.prisma.gym.update({ where: { id: gymId }, data: dto });
   }
 }

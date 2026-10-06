@@ -9,6 +9,7 @@ import { AuthPrismaService } from "./auth-prisma.service";
 import { PasswordService } from "./password.service";
 import { AuthAuditService } from "./auth-audit.service";
 import { AnalyticsService } from "../analytics/analytics.service";
+import { uniqueSlug } from "../common/slug";
 
 @Injectable()
 export class AuthService {
@@ -242,8 +243,14 @@ export class AuthService {
     const [firstName, ...lastNameParts] = input.ownerName.trim().split(/\s+/);
     const lastName = lastNameParts.join(" ");
 
+    // Nombre corto para los enlaces públicos (/registro/<slug>); el dueño
+    // puede cambiarlo después en Configuración.
+    const slug = await uniqueSlug(input.gymName, async (candidate) =>
+      Boolean(await this.prisma.gym.findUnique({ where: { slug: candidate }, select: { id: true } })),
+    );
+
     const result = await this.prisma.$transaction(async (tx) => {
-      const gym = await tx.gym.create({ data: { name: input.gymName } });
+      const gym = await tx.gym.create({ data: { name: input.gymName, slug } });
       const user = await tx.user.create({
         data: {
           email: input.ownerEmail,

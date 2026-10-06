@@ -1,0 +1,29 @@
+# Mantiene despierto el API en Render (plan gratuito, se duerme tras 15 min
+# sin tráfico). Respaldo externo del KeepAliveJob interno: si el servicio
+# llegara a dormirse (reinicio, deploy fallido), este ping lo despierta.
+#
+# URL configurable en Settings → Secrets and variables → Actions → Variables:
+#   KEEP_ALIVE_URL = https://fraguago-api.onrender.com
+#
+# Nota: GitHub puede retrasar los cron unos minutos y los desactiva tras 60
+# días sin actividad en el repo (se reactivan desde la pestaña Actions).
+name: keep-alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /api/health
+        env:
+          BASE_URL: ${{ vars.KEEP_ALIVE_URL || 'https://fraguago-api.onrender.com' }}
+        run: |
+          # --retry: un servicio dormido tarda ~1 min en despertar.
+          curl --fail --silent --show-error --max-time 90 \
+            --retry 3 --retry-delay 20 --retry-all-errors \
+            "${BASE_URL%/}/api/health"
