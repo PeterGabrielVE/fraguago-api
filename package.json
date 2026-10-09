@@ -9,7 +9,9 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "seed:demo": "node scripts/seed-demo.js",
+    "set-password": "node scripts/set-password.js"
   },
   "dependencies": {
     "@google/genai": "^2.22.0",
