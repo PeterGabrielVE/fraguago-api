@@ -36,6 +36,18 @@ export class HealthProfilesService {
   }
 
   /**
+   * GET /api/health-profiles (sin memberId)
+   * Todas las fichas del gym, para filtrar por condición en la pantalla de
+   * Salud. Los socios sin ficha no aparecen: el cliente los cruza con /members.
+   */
+  async findAll(gymId: string) {
+    return this.prisma.medicalProfile.findMany({
+      where: { gymId },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  /**
    * PUT /api/health-profiles?memberId=...
    * Crea la ficha si no existe, la actualiza si ya existe (upsert).
    * memberId es @unique en MedicalProfile, por eso el upsert funciona.

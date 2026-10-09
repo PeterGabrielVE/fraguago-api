@@ -25,6 +25,7 @@ import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dt
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 import { SearchMembersDto } from "./dto/search-members.dto";
+import { BirthdaysQueryDto } from "./dto/birthdays-query.dto";
 
 @Controller("members")
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,6 +42,13 @@ export class MembersController {
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   findAll(@GymId() gymId: string, @Query() query: SearchMembersDto) {
     return this.service.findAll(gymId, query);
+  }
+
+  // Antes de ":id" para que "birthdays" no se tome como id.
+  @Get("birthdays")
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  birthdays(@GymId() gymId: string, @Query() query: BirthdaysQueryDto) {
+    return this.service.birthdays(gymId, query);
   }
 
   @Get(":id")

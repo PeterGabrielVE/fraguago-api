@@ -273,7 +273,11 @@ async function main() {
     });
     members.push({
       id: memberId, gymId, userId, identificationNumber: ci,
-      birthDate: new Date(int(1972, 2007), int(0, 11), int(1, 28)),
+      // Los primeros cumplen años este mes (uno hoy) para lucir la campana y el
+      // panel de cumpleañeros; el resto, al azar. Medianoche UTC, como la API.
+      birthDate: i < 6
+        ? new Date(Date.UTC(int(1975, 2005), today.getMonth(), Math.min(28, Math.max(1, today.getDate() + [0, 2, 5, -3, 10, -8][i]))))
+        : new Date(Date.UTC(int(1972, 2007), int(0, 11), int(1, 28))),
       activityLevel: weighted([["BEGINNER", 4], ["INTERMEDIATE", 4], ["ADVANCED", 2]]),
       preferredShift: shift,
       primaryGoal: weighted([["MUSCLE_GAIN", 4], ["WEIGHT_LOSS", 4], ["GENERAL_WELLNESS", 3], ["PERFORMANCE_REHABILITATION", 1]]),

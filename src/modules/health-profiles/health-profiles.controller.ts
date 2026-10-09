@@ -24,9 +24,9 @@ export class HealthProfilesController {
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   find(
     @GymId() gymId: string, 
-    @Query('memberId') memberId: string
+    @Query('memberId') memberId?: string
   ) {
-    return this.service.findByMember(gymId, memberId);
+    return memberId ? this.service.findByMember(gymId, memberId) : this.service.findAll(gymId);
   }
 
   @Put()

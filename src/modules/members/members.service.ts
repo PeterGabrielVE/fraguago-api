@@ -17,6 +17,7 @@ import { EmergencyContactResponseDto } from "./dto/emergency-contact-response.dt
 import { UpsertEmergencyContactDto } from "./dto/upsert-emergency-contact.dto";
 import { UpsertMedicalProfileDto } from "./dto/upsert-medical-profile.dto";
 import { SearchMembersDto } from "./dto/search-members.dto";
+import { BirthdaysQueryDto } from "./dto/birthdays-query.dto";
 import { PublicRegisterMemberDto } from "./dto/public-register-member.dto";
 import { tenantContext } from "../../common/tenant/tenant.context";
 import { paginate } from "src/common/pagination";
@@ -322,6 +323,69 @@ export class MembersService {
       page: query.page,
       pageSize: query.pageSize,
     });
+  }
+
+  // ============================================================
+  // BIRTHDAYS
+  // ============================================================
+  // birthDate se guarda como fecha a medianoche UTC ("1990-05-10"), así que
+  // se compara por mes/día UTC. "Hoy" es el día en la zona del gym, no la del
+  // servidor (Render corre en UTC).
+  // ============================================================
+
+  async birthdays(gymId: string, query: BirthdaysQueryDto) {
+    const tz = process.env.APP_TZ || process.env.RETENTION_CRON_TZ || "America/Caracas";
+    const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date()).split("-").map(Number);
+    const today = Date.UTC(y, m - 1, d);
+    const DAY = 86_400_000;
+
+    const members = await this.prisma.member.findMany({
+      where: { gymId, birthDate: { not: null } },
+      select: {
+        id: true,
+        status: true,
+        birthDate: true,
+        user: { select: { email: true, profile: { select: { firstName: true, lastName: true, phone: true } } } },
+      },
+    });
+
+    const rows = members.map((member) => {
+      const dob = member.birthDate!;
+      const month = dob.getUTCMonth() + 1;
+      const day = dob.getUTCDate();
+      // Próximo cumpleaños (hoy cuenta). El 29/02 se celebra el 28/02 en años no bisiestos.
+      const nextIn = (year: number) => {
+        const date = new Date(Date.UTC(year, month - 1, day));
+        return date.getUTCMonth() === month - 1 ? date.getTime() : Date.UTC(year, 1, 28);
+      };
+      let next = nextIn(y);
+      if (next < today) next = nextIn(y + 1);
+      const daysUntil = Math.round((next - today) / DAY);
+      const profile = member.user.profile;
+      return {
+        memberId: member.id,
+        name: `${profile?.firstName ?? ""} ${profile?.lastName ?? ""}`.trim() || member.user.email,
+        phone: profile?.phone ?? null,
+        email: member.user.email,
+        status: member.status,
+        birthDate: dob.toISOString().slice(0, 10),
+        month,
+        day,
+        daysUntil,
+        // Edad que cumple en el próximo cumpleaños.
+        turns: new Date(next).getUTCFullYear() - dob.getUTCFullYear(),
+      };
+    });
+
+    if (query.days !== undefined) {
+      return rows
+        .filter((row) => row.daysUntil <= query.days!)
+        .sort((a, b) => a.daysUntil - b.daysUntil || a.name.localeCompare(b.name));
+    }
+    const month = query.month ?? m;
+    return rows
+      .filter((row) => row.month === month)
+      .sort((a, b) => a.day - b.day || a.name.localeCompare(b.name));
   }
 
   // ============================================================
