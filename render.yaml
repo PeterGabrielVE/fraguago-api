@@ -10,7 +10,9 @@ services:
     # --production=false: instala devDependencies (nest CLI, prisma) aunque
     # NODE_ENV=production.
     buildCommand: yarn install --frozen-lockfile --production=false && yarn prisma generate && yarn build
-    startCommand: npx prisma migrate deploy && node dist/main
+    # SEED_DEMO_ON_START=true regenera el "Gym Demo" (scripts/seed-demo.js) al
+    # arrancar; si falla, el API arranca igual. El plan gratis no tiene Shell.
+    startCommand: npx prisma migrate deploy && { [ "$SEED_DEMO_ON_START" != "true" ] || node scripts/seed-demo.js || echo "seed-demo falló"; } && node dist/main
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
@@ -37,6 +39,8 @@ services:
         value: America/Caracas
       - key: RETENTION_CRON_ENABLED
         value: "true"
+      - key: SEED_DEMO_ON_START
+        value: "false"
       # Opcionales. Render gratis bloquea los puertos SMTP 25/465/587:
       # usa el puerto 2525 (Brevo, Mailgun, SendGrid lo soportan).
       - key: SMTP_HOST
