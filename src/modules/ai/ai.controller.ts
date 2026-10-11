@@ -6,19 +6,11 @@ import { GymId } from '../../auth/decorators/gym-id.decorator';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { GenerateRoutineDto } from './dto/generate-routine.dto';
-import { AssistantChatDto } from './dto/assistant-chat.dto';
-import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AiController {
   constructor(private readonly ai: AiService) {}
-
-  // Asistente de ayuda para todos los roles (incluido el socio en su portal).
-  @Post('assistant')
-  assistant(@CurrentUser() user: any, @Body() dto: AssistantChatDto) {
-    return this.ai.assistantChat(user.role, dto);
-  }
 
   // Genera un borrador de rutina y lo DEVUELVE (no lo guarda).
   // El entrenador decide qué hacer con él.
