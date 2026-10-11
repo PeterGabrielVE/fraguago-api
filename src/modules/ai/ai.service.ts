@@ -1,7 +1,9 @@
-import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, ServiceUnavailableException } from '@nestjs/common';
 import { GoogleGenAI, Type } from '@google/genai';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { GenerateRoutineDto } from './dto/generate-routine.dto';
+import { AssistantChatDto } from './dto/assistant-chat.dto';
+import { assistantSystemInstruction } from './assistant-guide';
 
 @Injectable()
 export class AiService {
@@ -15,6 +17,50 @@ export class AiService {
 
   private sleep(ms: number) {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  // Asistente de ayuda: responde dudas de uso del sistema con base en la guía.
+  // No consulta datos del gimnasio ni ejecuta acciones.
+  async assistantChat(role: string, dto: AssistantChatDto) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new ServiceUnavailableException('El asistente no está configurado (falta GEMINI_API_KEY).');
+    }
+    // Gemini exige que la conversación empiece con el usuario.
+    const firstUser = dto.messages.findIndex((m) => m.role === 'user');
+    const messages = firstUser >= 0 ? dto.messages.slice(firstUser) : [];
+    if (messages.length === 0) return { reply: '' };
+
+    const maxIntentos = 3;
+    for (let intento = 1; intento <= maxIntentos; intento++) {
+      try {
+        const res = await this.client.models.generateContent({
+          model: this.model,
+          contents: messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] })),
+          config: {
+            systemInstruction: assistantSystemInstruction({ role, page: dto.page, locale: dto.locale ?? 'es' }),
+            temperature: 0.2, // respuestas fieles a la guía, no creativas
+            // Sin "thinking": en los modelos flash consume el mismo presupuesto de
+            // tokens y cortaba las respuestas; para dudas de uso no hace falta.
+            thinkingConfig: { thinkingBudget: 0 },
+            maxOutputTokens: 1024,
+          },
+        });
+        return { reply: (res.text ?? '').trim() };
+      } catch (e: any) {
+        const status = e?.status;
+        if ((status === 503 || status === 429) && intento < maxIntentos) {
+          await this.sleep(1000 * Math.pow(2, intento - 1));
+          continue;
+        }
+        console.error('🔴 ERROR GEMINI (asistente):', e);
+        throw new ServiceUnavailableException(
+          status === 429
+            ? 'El asistente recibió muchas consultas seguidas. Espera unos segundos y vuelve a preguntar.'
+            : 'El asistente no está disponible en este momento. Intenta de nuevo en unos segundos.',
+        );
+      }
+    }
+    throw new ServiceUnavailableException('El asistente no está disponible en este momento.');
   }
 
   async generarJSON<T>(

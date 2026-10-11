@@ -14,6 +14,8 @@ import {
   LoginDto,
   RegisterGymDto,
   RefreshDto,
+  SelectRoleDto,
+  SwitchRoleDto,
 } from "./dto/auth.dto";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { CurrentUser } from "./decorators/current-user.decorator";
@@ -49,13 +51,35 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { refreshToken, ...rest } = await this.auth.login(
+    const result = await this.auth.login(
       dto.email,
       dto.password,
       { ip: req.ip, userAgent: req.get("User-Agent") },
+      dto.role,
     );
+    // Varios roles: aún no hay sesión ni cookie, el front muestra el selector.
+    if ("roleSelectionRequired" in result) return result;
+    return this.startSession(result, res);
+  }
+
+  @Public()
+  @Post("select-role")
+  async selectRole(
+    @Body() dto: SelectRoleDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auth.selectRole(dto.selectionToken, dto.role, {
+      ip: req.ip,
+      userAgent: req.get("User-Agent"),
+    });
+    return this.startSession(result, res);
+  }
+
+  // Pone el refresh en la cookie y devuelve accessToken + user (sin el refresh).
+  private startSession<T extends { refreshToken: string }>(result: T, res: Response) {
+    const { refreshToken, ...rest } = result;
     res.cookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
-    // devolvemos accessToken + user, PERO no el refresh (ya va en la cookie)
     return rest;
   }
 
@@ -117,6 +141,29 @@ export class AuthController {
       maxAge: undefined,
     });
     return { success: true };
+  }
+
+  @Get("roles")
+  @UseGuards(JwtAuthGuard)
+  roles(@CurrentUser() user: any) {
+    return this.auth.myRoles(user.id, user.role);
+  }
+
+  @Post("switch-role")
+  @UseGuards(JwtAuthGuard)
+  async switchRole(
+    @CurrentUser() user: any,
+    @Body() dto: SwitchRoleDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.auth.switchRole(
+      { id: user.id, gymId: user.gymId, role: user.role },
+      dto.role,
+      req.cookies?.[REFRESH_COOKIE],
+      { ip: req.ip },
+    );
+    return this.startSession(result, res);
   }
 
   @Get("me")

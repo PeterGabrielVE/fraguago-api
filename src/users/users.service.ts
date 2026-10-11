@@ -7,6 +7,12 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ScopedPrismaClient, TENANT_PRISMA } from 'src/prisma/prisma.service';
 import { PasswordService } from 'src/auth/password.service';
+import { AuthService } from 'src/auth/auth.service';
+import { AuthAuditService } from 'src/auth/auth-audit.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { normalizeRoles, primaryRole, PRIVILEGED_ROLES, userRoles } from 'src/auth/user-roles';
+
+type Actor = { id: string; role: Role };
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 
 
@@ -15,12 +21,15 @@ export class UsersService {
   constructor(
     @Inject(TENANT_PRISMA) private readonly prisma: ScopedPrismaClient,
     private readonly passwords: PasswordService,
+    private readonly auth: AuthService,
+    private readonly audit: AuthAuditService,
   ) {}
 
   private readonly safeSelect = {
     id: true,
     email: true,
     role: true,
+    roles: true,
     createdAt: true,
     updatedAt: true,
     profile: {
@@ -35,12 +44,26 @@ export class UsersService {
   } as const;
 
   // USER-B02
-  async create(gymId: string, dto: CreateUserDto) {
+  async create(gymId: string, dto: CreateUserDto, actor: Actor) {
+    const roles = normalizeRoles(dto.roles ?? (dto.role ? [dto.role] : []));
+    if (roles.length === 0) {
+      throw new BadRequestException('Asigna al menos un rol');
+    }
+    this.assertCanGrant(roles, actor);
+    // Sin ficha de socio el portal no funciona; los socios se dan de alta en Socios.
+    if (roles.includes(Role.MEMBER)) {
+      throw new BadRequestException('Para el rol Socio, registra a la persona desde Socios');
+    }
+
     const existing = await this.prisma.user.findFirst({
       where: { gymId, email: dto.email },
     });
     if (existing) {
       throw new ConflictException('Ya existe un usuario con ese email en este gimnasio');
+    }
+
+    if (dto.confirmPassword !== undefined && dto.confirmPassword !== dto.password) {
+      throw new BadRequestException('Las contraseñas no coinciden');
     }
 
     const passwordHash = await this.passwords.hash(dto.password);
@@ -50,7 +73,10 @@ export class UsersService {
         gymId,
         email: dto.email,
         passwordHash,
-        role: dto.role,
+        role: primaryRole(roles),
+        roles,
+        // El rol entrenador necesita su ficha para aparecer en Entrenadores.
+        ...(roles.includes(Role.TRAINER) ? { trainer: { create: { gymId } } } : {}),
         profile: {
           create: {
             gymId,
@@ -113,28 +139,105 @@ export class UsersService {
     });
   }
 
-  // USER-B06
-  async updateRole(gymId: string, id: string, newRole: Role) {
-    const target = await this.findOne(gymId, id);
+  // USER-B06 — reemplaza los roles del usuario.
+  async updateRoles(gymId: string, id: string, requested: Role[], actor: Actor) {
+    const roles = normalizeRoles(requested);
+    if (roles.length === 0) {
+      throw new BadRequestException('Asigna al menos un rol');
+    }
 
-    const isDemotingPrivileged =
-      (target.role === Role.OWNER || target.role === Role.ADMIN) &&
-      newRole !== Role.OWNER && newRole !== Role.ADMIN;
+    const target = await this.prisma.user.findFirst({
+      where: { id, gymId },
+      select: { id: true, role: true, roles: true, member: { select: { id: true } }, trainer: { select: { id: true } } },
+    });
+    if (!target) throw new NotFoundException('Usuario no encontrado');
+    const current = userRoles(target);
 
-    if (isDemotingPrivileged) {
+    // Solo el OWNER puede tocar a otro OWNER o dar el rol OWNER.
+    if (current.includes(Role.OWNER) && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Solo el OWNER puede cambiar los roles del OWNER');
+    }
+    this.assertCanGrant(roles, actor);
+
+    // Sin ficha de socio el portal no funciona.
+    if (roles.includes(Role.MEMBER) && !target.member) {
+      throw new BadRequestException('Para el rol Socio, registra a la persona desde Socios');
+    }
+
+    const isPrivileged = (list: Role[]) => list.some((r) => PRIVILEGED_ROLES.includes(r));
+    if (isPrivileged(current) && !isPrivileged(roles)) {
       const privilegedCount = await this.prisma.user.count({
-        where: { gymId, role: { in: [Role.OWNER, Role.ADMIN] } },
+        where: {
+          gymId,
+          OR: [
+            { role: { in: PRIVILEGED_ROLES } },
+            { roles: { hasSome: PRIVILEGED_ROLES } },
+          ],
+        },
       });
       if (privilegedCount <= 1) {
         throw new BadRequestException('No podés dejar el gimnasio sin ningún OWNER/ADMIN');
       }
     }
 
-    return this.prisma.user.update({
-      where: { id },
-      data: { role: newRole },
-      select: this.safeSelect,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // El rol entrenador necesita su ficha para aparecer en Entrenadores, rutinas y horarios.
+      if (roles.includes(Role.TRAINER) && !target.trainer) {
+        await tx.trainer.create({ data: { gymId, userId: id } });
+      }
+      return tx.user.update({
+        where: { id },
+        data: { role: primaryRole(roles), roles },
+        select: this.safeSelect,
+      });
     });
+
+    // Si le quitaron un rol, sus sesiones abiertas con ese rol no pueden seguir.
+    const removed = current.some((r) => !roles.includes(r));
+    if (removed && id !== actor.id) {
+      await this.auth.logoutAll(id);
+    }
+    return updated;
+  }
+
+  private assertCanGrant(roles: Role[], actor: Actor) {
+    if (roles.includes(Role.OWNER) && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Solo el OWNER puede asignar el rol OWNER');
+    }
+  }
+
+  // Cambio de contraseña por un OWNER/ADMIN (o el propio usuario).
+  async changePassword(
+    gymId: string,
+    id: string,
+    dto: ChangePasswordDto,
+    actor: Actor,
+  ) {
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('Las contraseñas no coinciden');
+    }
+    const target = await this.findOne(gymId, id);
+    // Un ADMIN no puede tomar la cuenta del dueño cambiándole la clave.
+    if (userRoles(target).includes(Role.OWNER) && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Solo el OWNER puede cambiar la contraseña del OWNER');
+    }
+
+    const passwordHash = await this.passwords.hash(dto.password);
+    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+
+    // Si la cambia otro, cerramos las sesiones abiertas de ese usuario (si
+    // alguien más conocía la clave anterior, pierde el acceso). La propia
+    // sesión de quien la cambia no se toca.
+    if (id !== actor.id) {
+      await this.auth.logoutAll(id);
+    }
+    await this.audit.log({
+      gymId,
+      userId: id,
+      action: 'PASSWORD_CHANGED',
+      meta: { changedBy: actor.id, sessionsRevoked: id !== actor.id },
+    });
+    return { success: true };
   }
 
   // USER-B05
@@ -143,7 +246,7 @@ export class UsersService {
     if (id === actorId) {
       throw new ForbiddenException('No podés eliminar tu propio usuario');
     }
-    if (target.role === Role.OWNER) {
+    if (userRoles(target).includes(Role.OWNER)) {
       throw new ForbiddenException('No se puede eliminar al OWNER del gimnasio');
     }
     await this.prisma.user.delete({ where: { id } });

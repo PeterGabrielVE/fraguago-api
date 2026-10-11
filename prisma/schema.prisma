@@ -284,7 +284,10 @@ model User {
 
   email        String
   passwordHash String
+  // Rol principal (el de mayor jerarquía en `roles`); lo usan las consultas
+  // existentes. `roles` son todos los roles con los que puede iniciar sesión.
   role         Role
+  roles        Role[] @default([])
 
   gym           Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
   profile       Profile?

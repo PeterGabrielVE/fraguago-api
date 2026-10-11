@@ -9,6 +9,7 @@ import { Role } from '@prisma/client';
 import { ScopedPrismaClient, TENANT_PRISMA } from '../../prisma/prisma.service';
 import { PasswordService } from '../../auth/password.service';
 import { CreateTrainerDto } from './dto/create-trainer.dto';
+import { primaryRole, userRoles } from '../../auth/user-roles';
 import { UpdateTrainerDto } from './dto/update-trainer.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 
@@ -53,11 +54,13 @@ export class TrainersService {
       throw new ConflictException('Ese usuario ya está registrado como entrenador');
     }
 
-    // Transacción: subimos el rol a TRAINER y creamos el registro Trainer.
+    // Transacción: sumamos TRAINER a sus roles (conserva los que ya tenía, p.
+    // ej. socio) y creamos el registro Trainer.
+    const roles = userRoles({ ...user, roles: [...userRoles(user), Role.TRAINER] });
     return this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: dto.userId },
-        data: { role: Role.TRAINER },
+        data: { role: primaryRole(roles), roles },
       });
 
       return tx.trainer.create({
@@ -93,6 +96,7 @@ export class TrainersService {
           email: dto.email!,
           passwordHash,
           role: Role.TRAINER,
+          roles: [Role.TRAINER],
           profile: {
             create: {
               gymId,

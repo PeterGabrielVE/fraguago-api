@@ -1,5 +1,5 @@
 import {
-  IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength,
+  ArrayNotEmpty, ArrayUnique, IsArray, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength,
 } from 'class-validator';
 import { Role } from '@prisma/client';
 
@@ -8,8 +8,13 @@ export class CreateUserDto {
   email!: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(7)
   password!: string;
+
+  // Opcional para no romper clientes que no lo mandan; si viene, debe coincidir.
+  @IsOptional()
+  @IsString()
+  confirmPassword?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -19,8 +24,17 @@ export class CreateUserDto {
   @IsString()
   lastName?: string;
 
+  // Uno o varios roles; `role` se mantiene por compatibilidad (un solo rol).
+  @IsOptional()
   @IsEnum(Role)
-  role!: Role;
+  role?: Role;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsEnum(Role, { each: true })
+  roles?: Role[];
 
   @IsOptional()
   @IsString()

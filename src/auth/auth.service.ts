@@ -1,8 +1,10 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   UnauthorizedException,
 } from "@nestjs/common";
+import { Role } from "@prisma/client";
 import { JwtService, JwtSignOptions } from "@nestjs/jwt";
 import { createHash, randomBytes } from "crypto";
 import { AuthPrismaService } from "./auth-prisma.service";
@@ -10,6 +12,14 @@ import { PasswordService } from "./password.service";
 import { AuthAuditService } from "./auth-audit.service";
 import { AnalyticsService } from "../analytics/analytics.service";
 import { uniqueSlug } from "../common/slug";
+import { userRoles } from "./user-roles";
+
+// Token temporal entre "contraseña correcta" y "rol elegido". Solo sirve para
+// /auth/select-role (lleva purpose) y vence rápido.
+const ROLE_SELECTION_PURPOSE = "role-select";
+const ROLE_SELECTION_TTL_SEC = 5 * 60;
+
+type LoginContext = { ip?: string; userAgent?: string };
 
 // Duración de los tokens (segundos). Se leen en cada llamada para respetar el
 // .env aunque se cargue después de importar este módulo.
@@ -41,7 +51,8 @@ export class AuthService {
   async login(
     email: string,
     password: string,
-    ctx?: { ip?: string; userAgent?: string },
+    ctx?: LoginContext,
+    requestedRole?: Role,
   ) {
     const user = await this.prisma.user.findFirst({
       where: { email },
@@ -66,23 +77,84 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
+    const roles = userRoles(user);
+    if (requestedRole) {
+      return this.completeLogin(user, requestedRole, ctx);
+    }
+    if (roles.length === 1) {
+      return this.completeLogin(user, roles[0], ctx);
+    }
+
+    // Varios roles: todavía no hay sesión, el usuario elige con cuál entrar.
+    const selectionToken = await this.jwtService.signAsync(
+      { sub: user.id, purpose: ROLE_SELECTION_PURPOSE },
+      { secret: process.env.JWT_ACCESS_SECRET, expiresIn: ROLE_SELECTION_TTL_SEC },
+    );
+    return {
+      roleSelectionRequired: true as const,
+      roles,
+      selectionToken,
+      user: { firstName: user.profile?.firstName, email: user.email },
+    };
+  }
+
+  // Segundo paso del login cuando el usuario tiene varios roles.
+  async selectRole(selectionToken: string, role: Role, ctx?: LoginContext) {
+    let payload: { sub: string; purpose?: string };
+    try {
+      payload = await this.jwtService.verifyAsync(selectionToken, {
+        secret: process.env.JWT_ACCESS_SECRET,
+      });
+    } catch {
+      throw new UnauthorizedException("La selección de rol expiró, vuelve a iniciar sesión");
+    }
+    if (payload.purpose !== ROLE_SELECTION_PURPOSE) {
+      throw new UnauthorizedException("Invalid selection token");
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { gym: true, profile: true },
+    });
+    if (!user) throw new UnauthorizedException("Invalid selection token");
+    return this.completeLogin(user, role, ctx);
+  }
+
+  private async completeLogin(
+    user: {
+      id: string;
+      email: string;
+      gymId: string;
+      role: Role;
+      roles: Role[];
+      gym: unknown;
+      profile: { firstName: string; lastName: string } | null;
+    },
+    role: Role,
+    ctx?: LoginContext,
+  ) {
+    const roles = userRoles(user);
+    if (!roles.includes(role)) {
+      throw new ForbiddenException("No tienes ese rol asignado");
+    }
+
     const tokens = await this.issueTokens({
       sub: user.id,
       email: user.email,
       gymId: user.gymId,
-      role: user.role,
+      role,
     });
 
     await this.audit.log({
       gymId: user.gymId,
       userId: user.id,
       action: "LOGIN_SUCCESS",
-      meta: { ip: ctx?.ip, userAgent: ctx?.userAgent },
+      meta: { ip: ctx?.ip, userAgent: ctx?.userAgent, role },
     });
 
-    this.analytics.identify(user.id, { role: user.role, gymId: user.gymId });
-    this.analytics.groupIdentify(user.gymId, { name: user.gym?.name });
-    this.analytics.capture(user.id, "user_logged_in", { role: user.role }, user.gymId);
+    this.analytics.identify(user.id, { role, gymId: user.gymId });
+    this.analytics.groupIdentify(user.gymId, { name: (user.gym as { name?: string } | null)?.name });
+    this.analytics.capture(user.id, "user_logged_in", { role }, user.gymId);
 
     return {
       ...tokens,
@@ -94,11 +166,70 @@ export class AuthService {
         fullName: user.profile
           ? `${user.profile.firstName} ${user.profile.lastName}`
           : undefined,
-        role: user.role,
+        // role = rol con el que entró en esta sesión.
+        role,
+        roles,
         gymId: user.gymId,
         gym: user.gym,
       },
     };
+  }
+
+  // =====================================================================
+  // ROLES DE LA SESIÓN
+  // =====================================================================
+  // Roles actuales del usuario (desde la BD, no del token: pueden haber cambiado).
+  async myRoles(userId: string, activeRole: Role) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, roles: true },
+    });
+    if (!user) throw new UnauthorizedException();
+    return { active: activeRole, roles: userRoles(user) };
+  }
+
+  // Cambia el rol de la sesión sin pedir la contraseña: ya está autenticado y
+  // solo puede pasar a un rol que tenga asignado. Rota los tokens.
+  async switchRole(
+    actor: { id: string; gymId: string; role: Role },
+    role: Role,
+    refreshToken?: string,
+    ctx?: { ip?: string },
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actor.id },
+      include: { profile: true },
+    });
+    if (!user || user.gymId !== actor.gymId) throw new UnauthorizedException();
+    const roles = userRoles(user);
+    if (!roles.includes(role)) {
+      throw new ForbiddenException("No tienes ese rol asignado");
+    }
+
+    // El refresh de la sesión anterior queda inválido: la nueva lleva otro rol.
+    if (refreshToken) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, tokenHash: this.hashToken(refreshToken), revoked: false },
+        data: { revoked: true },
+      });
+    }
+
+    const tokens = await this.issueTokens({
+      sub: user.id,
+      email: user.email,
+      gymId: user.gymId,
+      role,
+    });
+
+    await this.audit.log({
+      gymId: user.gymId,
+      userId: user.id,
+      action: "ROLE_SWITCHED",
+      meta: { from: actor.role, to: role, ip: ctx?.ip },
+    });
+    this.analytics.capture(user.id, "role_switched", { from: actor.role, to: role }, user.gymId);
+
+    return { ...tokens, user: { id: user.id, role, roles } };
   }
 
   async forgotPassword(email: string) {
@@ -115,7 +246,7 @@ export class AuthService {
       throw new UnauthorizedException("Missing refresh token");
     }
 
-    let payload: { sub: string };
+    let payload: { sub: string; role?: Role };
     try {
       payload = await this.jwtService.verifyAsync(refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
@@ -164,6 +295,13 @@ export class AuthService {
     });
     if (!user) throw new UnauthorizedException("Invalid refresh token");
 
+    // La sesión conserva el rol con el que se entró. Si ya no lo tiene (se lo
+    // quitaron), se corta: debe volver a entrar y elegir otro.
+    const role = payload.role ?? user.role; // tokens previos a roles múltiples
+    if (!userRoles(user).includes(role)) {
+      throw new UnauthorizedException("Role no longer assigned");
+    }
+
     await this.audit.log({
       gymId: user.gymId,
       userId: user.id,
@@ -173,7 +311,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       gymId: user.gymId,
-      role: user.role,
+      role,
     });
   }
 
@@ -311,7 +449,8 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync(payload, accessOptions);
 
     const refreshToken = await this.jwtService.signAsync(
-      { sub: payload.sub, jti: randomBytes(16).toString("hex") },
+      // role: rol activo de la sesión, para mantenerlo al renovar.
+      { sub: payload.sub, role: payload.role, jti: randomBytes(16).toString("hex") },
       refreshOptions,
     );
 

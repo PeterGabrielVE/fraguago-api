@@ -7,7 +7,9 @@ export type AuthAction =
   | 'LOGOUT'
   | 'LOGOUT_ALL'
   | 'TOKEN_REFRESH'
-  | 'TOKEN_REUSE_DETECTED';
+  | 'TOKEN_REUSE_DETECTED'
+  | 'PASSWORD_CHANGED'
+  | 'ROLE_SWITCHED';
 
 interface AuditEntry {
   gymId: string;

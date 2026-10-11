@@ -6,6 +6,8 @@ import { Role } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { UpdateRolesDto } from './dto/update-roles.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { PaginationDto } from 'src/common/dto/pagination.dto';
 import { RolesGuard } from 'src/common/roles.guard';
@@ -20,8 +22,8 @@ export class UsersController {
 
   @Post()
   @Roles(Role.OWNER, Role.ADMIN)
-  create(@GymId() gymId: string, @Body() dto: CreateUserDto) {
-    return this.service.create(gymId, dto);
+  create(@GymId() gymId: string, @Body() dto: CreateUserDto, @CurrentUser() actor: any) {
+    return this.service.create(gymId, dto, actor);
   }
 
   @Get()
@@ -43,10 +45,38 @@ export class UsersController {
   }
 
   // :id/role — ruta más específica, Nest la resuelve antes que :id
+  // Compatibilidad: reemplaza todos los roles por uno solo.
   @Patch(':id/role')
   @Roles(Role.OWNER, Role.ADMIN)
-  updateRole(@GymId() gymId: string, @Param('id') id: string, @Body() dto: UpdateRoleDto) {
-    return this.service.updateRole(gymId, id, dto.role);
+  updateRole(
+    @GymId() gymId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateRoleDto,
+    @CurrentUser() actor: any,
+  ) {
+    return this.service.updateRoles(gymId, id, [dto.role], actor);
+  }
+
+  @Patch(':id/roles')
+  @Roles(Role.OWNER, Role.ADMIN)
+  updateRoles(
+    @GymId() gymId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateRolesDto,
+    @CurrentUser() actor: any,
+  ) {
+    return this.service.updateRoles(gymId, id, dto.roles, actor);
+  }
+
+  @Patch(':id/password')
+  @Roles(Role.OWNER, Role.ADMIN)
+  changePassword(
+    @GymId() gymId: string,
+    @Param('id') id: string,
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() actor: any,
+  ) {
+    return this.service.changePassword(gymId, id, dto, actor);
   }
 
   @Delete(':id')
