@@ -11,6 +11,14 @@ import { AuthAuditService } from "./auth-audit.service";
 import { AnalyticsService } from "../analytics/analytics.service";
 import { uniqueSlug } from "../common/slug";
 
+// Duración de los tokens (segundos). Se leen en cada llamada para respetar el
+// .env aunque se cargue después de importar este módulo.
+//  - Access: corto (15 min); el front lo renueva solo con el refresh token.
+//  - Refresh: 7 días deslizantes (cada renovación emite uno nuevo). El cierre
+//    por inactividad (30 min) lo controla el front con aviso previo.
+export const accessTtlSec = () => Number(process.env.JWT_ACCESS_EXPIRES_SEC ?? 900);
+export const refreshTtlSec = () => Number(process.env.JWT_REFRESH_EXPIRES_SEC ?? 604800);
+
 @Injectable()
 export class AuthService {
   // Hash bcrypt real para igualar el tiempo de cómputo cuando el email
@@ -292,12 +300,12 @@ export class AuthService {
   }) {
     const accessOptions: JwtSignOptions = {
       secret: process.env.JWT_ACCESS_SECRET,
-      expiresIn: Number(process.env.JWT_ACCESS_EXPIRES_SEC ?? 900), 
+      expiresIn: accessTtlSec(),
     };
 
     const refreshOptions: JwtSignOptions = {
       secret: process.env.JWT_REFRESH_SECRET,
-      expiresIn: Number(process.env.JWT_REFRESH_EXPIRES_SEC ?? 604800),
+      expiresIn: refreshTtlSec(),
     };
 
     const accessToken = await this.jwtService.signAsync(payload, accessOptions);
@@ -307,8 +315,8 @@ export class AuthService {
       refreshOptions,
     );
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    // Misma vigencia que el JWT y la cookie (antes fija en 7 días).
+    const expiresAt = new Date(Date.now() + refreshTtlSec() * 1000);
     await this.prisma.refreshToken.create({
       data: {
         userId: payload.sub,
