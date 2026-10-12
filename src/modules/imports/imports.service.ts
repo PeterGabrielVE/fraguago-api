@@ -81,6 +81,9 @@ type MemberIndexEntry = {
   externalId: string | null;
   identificationNumber: string;
   email: string;
+  // Importación que lo creó (null = registrado en el sistema) y fecha de alta.
+  importJobId: string | null;
+  joinedAt: Date;
 };
 
 type MemberIndex = {
@@ -123,6 +126,8 @@ export class ImportsService {
         id: true,
         externalId: true,
         identificationNumber: true,
+        importJobId: true,
+        joinedAt: true,
         user: { select: { email: true, profile: { select: { firstName: true, lastName: true } } } },
       },
     });
@@ -133,6 +138,8 @@ export class ImportsService {
       externalId: m.externalId,
       identificationNumber: m.identificationNumber,
       email: m.user.email,
+      importJobId: m.importJobId,
+      joinedAt: m.joinedAt,
     });
     return index;
   }
@@ -182,6 +189,14 @@ export class ImportsService {
     const type = PLAN_KEYWORDS.find(([re]) => re.test(`${key} `))?.[1];
     const ofType = type ? plans.filter((p) => p.type === type) : [];
     return ofType.length === 1 ? ofType[0] : null;
+  }
+
+  // Cuántos días después de la fecha del archivo puede empezar una membresía
+  // del sistema para considerarla el MISMO pago anotado con otra fecha: hasta
+  // una semana, y nunca más de la mitad del periodo (un plan semanal siguiente
+  // empieza a los 7 días y es otro pago).
+  private sameDateTolerance(periodDays: number): number {
+    return Math.max(0, Math.min(7, Math.floor(periodDays / 2)));
   }
 
   private inferPlanType(days: number): MembershipType {
@@ -283,11 +298,25 @@ export class ImportsService {
     const [index, plans, memberships] = await Promise.all([
       this.loadMemberIndex(gymId),
       this.loadPlans(gymId),
-      this.prisma.membership.findMany({ where: { gymId }, select: { memberId: true, startDate: true } }),
+      this.prisma.membership.findMany({
+        where: { gymId },
+        select: { memberId: true, startDate: true, endDate: true, status: true, importJobId: true },
+      }),
     ]);
     const existingStarts = new Set(memberships.map((m) => `${m.memberId}|${this.ymdLocal(m.startDate)}`));
-    const seenExternal = new Map<string, number>();
-    const seenName = new Map<string, number>();
+    // Membresías registradas en el sistema (no importadas), por socio: lo que
+    // diga el archivo sobre un periodo que ya cubren no se importa.
+    const systemSpans = new Map<string, { start: string; end: string }[]>();
+    for (const m of memberships) {
+      if (m.importJobId || m.status === 'CANCELLED') continue;
+      const spans = systemSpans.get(m.memberId) ?? [];
+      spans.push({ start: this.ymdLocal(m.startDate), end: this.ymdLocal(m.endDate) });
+      systemSpans.set(m.memberId, spans);
+    }
+    // Filas ya vistas de cada socio (por ID, o por nombre si la fila no trae
+    // ID) y las fechas de pago que traían: un socio puede tener varias filas,
+    // una por pago.
+    const seen = new Map<string, { row: number; payments: Set<string> }>();
     const today = this.ymdLocal(new Date());
     let sumAmount = 0;
     let sumAmountBs = 0;
@@ -415,28 +444,51 @@ export class ImportsService {
         ...(notes ? { notes } : {}),
       };
 
-      // --- Duplicados dentro del archivo ---
-      const nameKey = normalizeKey(displayName);
-      const dupOf = (externalId && seenExternal.get(externalId.toLowerCase())) || (!externalId && seenName.get(nameKey));
-      if (externalId) seenExternal.set(externalId.toLowerCase(), seenExternal.get(externalId.toLowerCase()) ?? rowNumber);
-      seenName.set(nameKey, seenName.get(nameKey) ?? rowNumber);
-      if (dupOf && dupOf !== rowNumber) {
-        return { row: rowNumber, status: 'DUPLICATE', data, errors: [], warnings: [`Duplicado de la fila ${dupOf}: se omitirá`] };
+      // --- Otras filas del mismo socio en el archivo ---
+      // Con otra fecha de pago es un pago más de su historial; sin pago nuevo
+      // (misma fecha, o fila sin pago) es una fila repetida.
+      const idKey = externalId ? `id:${externalId.toLowerCase()}` : null;
+      const nameKey = `name:${normalizeKey(displayName)}`;
+      const earlier = (idKey ? seen.get(idKey) : seen.get(nameKey)) ?? null;
+      const repeated = !!earlier && (!willPay || earlier.payments.has(paymentDate!));
+      for (const key of [idKey, nameKey]) {
+        if (!key) continue;
+        const entry = seen.get(key) ?? { row: rowNumber, payments: new Set<string>() };
+        if (willPay) entry.payments.add(paymentDate!);
+        seen.set(key, entry);
       }
+      if (earlier && repeated) {
+        return { row: rowNumber, status: 'DUPLICATE', data, errors: [], warnings: [`Duplicado de la fila ${earlier.row}: se omitirá`] };
+      }
+      if (earlier) warnings.push(`Otro pago del socio de la fila ${earlier.row}: se agrega a su historial`);
 
       // --- Duplicados contra la base ---
       const found = this.findMember(index, { externalId, identificationNumber, email, name: displayName });
-      if (found.ambiguous) warnings.push('Hay varios socios con este nombre: se creará uno nuevo (agrega el ID o la cédula para vincularlo)');
+      if (found.ambiguous) {
+        // La primera fila crea un socio nuevo; las siguientes no sabrían a cuál sumarse.
+        if (earlier) errors.push('Hay varios socios con este nombre y el archivo trae varios pagos: agrega el ID o la cédula para saber a cuál corresponden');
+        else warnings.push('Hay varios socios con este nombre: se creará uno nuevo (agrega el ID o la cédula para vincularlo)');
+      }
       if (found.entry) {
         if (found.by === 'nombre') warnings.push(`Coincide por nombre con "${found.entry.name}": se vinculará a ese socio`);
         if (willPay && existingStarts.has(`${found.entry.id}|${paymentDate}`)) {
           warnings.push('Este pago ya estaba importado: se omitirá');
+        } else if (willPay) {
+          const span = paymentDate && dueDate ? daysBetween(paymentDate, dueDate) : 0;
+          const days = span > 0 ? span : validDays ?? plan?.durationDays ?? 30;
+          const latestStart = addDays(paymentDate!, this.sameDateTolerance(days));
+          const overlap = systemSpans.get(found.entry.id)?.find((s) => s.start <= latestStart && s.end >= paymentDate!);
+          if (overlap) {
+            const fmt = (s: string) => s.split('-').reverse().join('/');
+            warnings.push(`Ya tiene en el sistema una membresía para ese periodo (${fmt(overlap.start)}–${fmt(overlap.end)}): no se creará membresía ni ingreso`);
+          }
         }
       }
 
       return {
         row: rowNumber,
-        status: errors.length ? 'ERROR' : found.entry ? 'EXISTING' : 'NEW',
+        // Una fila con otro pago de un socio que crea este mismo archivo ya no es "nueva".
+        status: errors.length ? 'ERROR' : found.entry || earlier ? 'EXISTING' : 'NEW',
         data,
         errors,
         warnings,
@@ -622,7 +674,7 @@ export class ImportsService {
 
     for (const row of rows) {
       try {
-        results.push(await this.importMemberRow(gymId, row, options, index, plans, priceHints));
+        results.push(await this.importMemberRow(gymId, jobId, row, options, index, plans, priceHints));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         results.push({ row: row.row, status: 'FAILED', message });
@@ -634,6 +686,7 @@ export class ImportsService {
 
   private async importMemberRow(
     gymId: string,
+    jobId: string,
     row: MemberImportRowDto,
     options: MembersImportOptionsDto,
     index: MemberIndex,
@@ -650,6 +703,8 @@ export class ImportsService {
     const parts: string[] = [];
     let status: CommitStatus = 'SKIPPED';
     let memberId: string;
+    // Fecha de un pago real de la fila (no pendiente): cuenta para la fecha de alta.
+    const paidOn = row.paymentStatus !== 'PENDING' && row.paymentDate ? localDate(row.paymentDate) : null;
 
     if (!found.entry) {
       // Socio nuevo. Sin email/cédula se usan valores provisionales únicos
@@ -672,12 +727,25 @@ export class ImportsService {
         externalId,
       });
       memberId = created.id;
-      this.addToIndex(index, { id: memberId, name, externalId: externalId ?? null, identificationNumber, email });
+      // Socio desde su primer pago, no desde el día en que se sube el archivo.
+      const joinedAt = paidOn ?? created.joinedAt;
+      await this.prisma.member.update({
+        where: { id: memberId },
+        data: { importJobId: jobId, ...(paidOn ? { joinedAt: paidOn } : {}) },
+      });
+      this.addToIndex(index, { id: memberId, name, externalId: externalId ?? null, identificationNumber, email, importJobId: jobId, joinedAt });
       status = 'CREATED';
       parts.push('Socio creado');
     } else {
       memberId = found.entry.id;
       parts.push(`Socio existente (por ${found.by})`);
+      // Otra fila del mismo socio que creó esta importación, con un pago
+      // anterior: ese es su primer pago. A los socios que ya estaban en el
+      // sistema no se les toca la fecha de alta.
+      if (paidOn && found.entry.importJobId === jobId && paidOn < found.entry.joinedAt) {
+        await this.prisma.member.update({ where: { id: memberId }, data: { joinedAt: paidOn } });
+        found.entry.joinedAt = paidOn;
+      }
       if (options.updateExisting) {
         const changes = await this.fillMissing(gymId, found.entry, row, index);
         if (changes.length) { status = 'UPDATED'; parts.push(`actualizado: ${changes.join(', ')}`); }
@@ -690,7 +758,7 @@ export class ImportsService {
     } else if (!row.paymentDate) {
       parts.push('sin fecha de pago (sin membresía)');
     } else {
-      const paid = await this.importPayment(gymId, memberId, row, options, plans, priceHints);
+      const paid = await this.importPayment(gymId, jobId, memberId, row, options, plans, priceHints);
       parts.push(paid.message);
       if (paid.created && status === 'SKIPPED') status = 'UPDATED';
     }
@@ -734,6 +802,7 @@ export class ImportsService {
 
   private async importPayment(
     gymId: string,
+    jobId: string,
     memberId: string,
     row: MemberImportRowDto,
     options: MembersImportOptionsDto,
@@ -773,10 +842,31 @@ export class ImportsService {
     });
     if (exists) return { created: false, message: 'pago ya importado (omitido)' };
 
+    // Solapamiento: una membresía registrada en el sistema (no importada) que
+    // cubre ese día, o que empieza pocos días después (el mismo pago anotado
+    // con otra fecha), manda sobre el archivo: así no se cuenta dos veces.
+    // Entre membresías importadas no aplica: una renovación anticipada del
+    // historial es válida.
+    const tolerance = this.sameDateTolerance(daysBetween(start, end));
+    const covering = await this.prisma.membership.findFirst({
+      where: {
+        gymId,
+        memberId,
+        importJobId: null,
+        status: { not: 'CANCELLED' },
+        startDate: { lt: new Date(dayEnd.getTime() + tolerance * 86_400_000) },
+        endDate: { gte: startDate },
+      },
+      select: { id: true },
+    });
+    if (covering) {
+      return { created: false, message: 'ya tiene en el sistema una membresía para ese periodo (omitido)' };
+    }
+
     const noteParts = ['Importado', row.notes, row.amountBs ? `Pagado Bs ${row.amountBs.toLocaleString('es-VE')}` : null];
     await this.prisma.$transaction(async (tx) => {
       await tx.membership.create({
-        data: { gymId, memberId, planId: plan!.id, startDate, endDate: localDate(end, 23) },
+        data: { gymId, memberId, planId: plan!.id, startDate, endDate: localDate(end, 23), importJobId: jobId },
       });
       if (row.amount && row.amount > 0) {
         await this.finances.create(gymId, {

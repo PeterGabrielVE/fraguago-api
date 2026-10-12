@@ -426,6 +426,9 @@ model Member {
   // hoja de asistencia. Único por gym.
   externalId String?
 
+  // Importación (ImportJob) que creó al socio; null si se registró en el sistema.
+  importJobId String?
+
   joinedAt  DateTime @default(now())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -588,6 +591,11 @@ model Membership {
   startDate DateTime         @default(now())
   endDate   DateTime
   status    MembershipStatus @default(ACTIVE)
+
+  // Importación (ImportJob) que la creó; null si se registró en el sistema.
+  // Distingue el historial traído del Excel de lo cargado por el personal: al
+  // importar, lo registrado en el sistema manda sobre lo que diga el archivo.
+  importJobId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
