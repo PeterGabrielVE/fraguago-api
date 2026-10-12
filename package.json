@@ -1,6 +1,6 @@
 {
   "name": "fraguago-api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-tenant NestJS backend for FraguaGo (gym SaaS)",
   "scripts": {
     "build": "nest build",
