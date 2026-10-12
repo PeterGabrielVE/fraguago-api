@@ -188,6 +188,21 @@ export class AuthService {
     return { active: activeRole, roles: userRoles(user) };
   }
 
+  // Datos de la sesión más el nombre del perfil, para que cualquier rol pueda
+  // mostrar quién está conectado sin pasar por /users (solo OWNER/ADMIN).
+  async me(actor: { id: string; email: string; gymId: string; role: Role }) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actor.id },
+      select: { profile: { select: { firstName: true, lastName: true } } },
+    });
+    if (!user) throw new UnauthorizedException();
+    return {
+      ...actor,
+      firstName: user.profile?.firstName ?? null,
+      lastName: user.profile?.lastName ?? null,
+    };
+  }
+
   // Cambia el rol de la sesión sin pedir la contraseña: ya está autenticado y
   // solo puede pasar a un rol que tenga asignado. Rota los tokens.
   async switchRole(

@@ -39,7 +39,7 @@ export class PublicRegisterMemberDto {
   email!: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(7)
   @MaxLength(72)
   password!: string;
 

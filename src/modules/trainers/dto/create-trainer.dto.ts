@@ -19,7 +19,7 @@ export class CreateTrainerDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(8)
+  @MinLength(7)
   password?: string;
 
   @IsOptional()

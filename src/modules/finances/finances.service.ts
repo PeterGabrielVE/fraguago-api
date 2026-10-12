@@ -195,7 +195,12 @@ export class FinancesService {
         skip: (safePage - 1) * safePageSize,
         take: safePageSize,
         // Solo el id del comprobante (la imagen se pide aparte).
-        include: { concept: true, receipt: { select: { id: true } } },
+        include: {
+          concept: true,
+          receipt: { select: { id: true } },
+          // Nombre del socio, para enlazar el pago con su ficha.
+          member: { select: { id: true, user: { select: { profile: { select: { firstName: true, lastName: true } } } } } },
+        },
       }),
       this.prisma.transaction.count({ where }),
     ]);

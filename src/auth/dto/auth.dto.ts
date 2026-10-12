@@ -45,7 +45,7 @@ export class RegisterGymDto {
   ownerEmail!: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(7)
   ownerPassword!: string;
 
   @IsString()
