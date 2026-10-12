@@ -21,6 +21,8 @@ import { BirthdaysQueryDto } from "./dto/birthdays-query.dto";
 import { PublicRegisterMemberDto } from "./dto/public-register-member.dto";
 import { tenantContext } from "../../common/tenant/tenant.context";
 import { paginate } from "src/common/pagination";
+import { SyncMemberCreatePayload } from "../sync/dto/sync-operation.dto";
+import { SyncRejection } from "../sync/sync-rejection";
 
 type Tx = Parameters<Parameters<ScopedPrismaClient["$transaction"]>[0] extends infer F
   ? F extends (tx: any) => any ? F : never
@@ -129,13 +131,88 @@ export class MembersService {
     };
   }
 
+  // Alta de socio que llega por la cola de sincronización (POST
+  // /sync/operations). `id` lo generó el cliente: si el socio ya existe, la
+  // operación ya se aplicó (reintento) y se devuelve tal cual. Datos, ficha
+  // médica y contacto se guardan en una sola transacción. La contraseña
+  // inicial es la cédula, igual que en el alta del panel.
+  async syncCreate(gymId: string, id: string, dto: SyncMemberCreatePayload) {
+    const existing = await this.prisma.member.findFirst({
+      where: { id, gymId },
+      select: { id: true },
+    });
+    if (existing) return this.findOne(gymId, id);
+
+    try {
+      await this.assertNoDuplicates(gymId, {
+        email: dto.email,
+        identificationNumber: dto.identificationNumber,
+      });
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        throw new SyncRejection("DUPLICATE_MEMBER", err.message, "conflict");
+      }
+      throw err;
+    }
+
+    const passwordHash = await this.passwords.hash(dto.identificationNumber);
+    const { medicalProfile, emergencyContact, ...details } = dto;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.createUserAndMember(tx, gymId, details, passwordHash, id);
+
+        if (medicalProfile) {
+          await tx.medicalProfile.create({
+            data: {
+              gymId,
+              memberId: id,
+              ...medicalProfile,
+              injuryDescription: medicalProfile.hasInjury
+                ? (medicalProfile.injuryDescription ?? null)
+                : null,
+              medicationDescription: medicalProfile.takesMedication
+                ? (medicalProfile.medicationDescription ?? null)
+                : null,
+            },
+          });
+        }
+
+        if (emergencyContact) {
+          await tx.emergencyContact.create({
+            data: { gymId, memberId: id, ...emergencyContact },
+          });
+        }
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        // La misma operación llegó dos veces a la vez: la otra ya lo creó.
+        const created = await this.prisma.member.findFirst({
+          where: { id, gymId },
+          select: { id: true },
+        });
+        if (created) return this.findOne(gymId, id);
+        throw new SyncRejection(
+          "DUPLICATE_MEMBER",
+          "Ya existe un socio con esa cédula o correo.",
+          "conflict",
+        );
+      }
+      throw err;
+    }
+
+    return this.findOne(gymId, id);
+  }
+
   // User └── Profile └── Member dentro de una transacción ya abierta.
-  // Compartido por el alta del panel y el formulario público.
+  // Compartido por el alta del panel, el formulario público y la cola de
+  // sincronización (que trae el id del socio ya generado en el cliente).
   private async createUserAndMember(
     tx: Tx,
     gymId: string,
     dto: Omit<CreateMemberDto, "password">,
     passwordHash: string,
+    memberId?: string,
   ) {
     const user = await tx.user.create({
       data: {
@@ -158,6 +235,7 @@ export class MembersService {
 
     return tx.member.create({
       data: {
+        id: memberId,
         gymId,
         userId: user.id,
         identificationNumber: dto.identificationNumber,

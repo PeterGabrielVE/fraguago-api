@@ -255,6 +255,9 @@ model Gym {
 
   importJobs ImportJob[]
 
+  syncOperations SyncOperation[]
+  kioskEntries   KioskEntry[]
+
   paymentReceipts PaymentReceipt[]
 
   exercises        Exercise[]
@@ -1389,6 +1392,74 @@ model ImportJob {
   gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
 
   @@index([gymId, startedAt])
+}
+
+// =====================================================================
+// SYNC OPERATIONS (modo offline)
+// =====================================================================
+//
+// Registro de idempotencia de las operaciones hechas sin conexión. El `id`
+// lo genera el cliente (UUID) y viaja con la operación: si la misma llega dos
+// veces (reintento, respuesta perdida, dos pestañas) se devuelve el resultado
+// guardado en vez de aplicarla de nuevo. Solo se guardan las APLICADAS: una
+// rechazada se vuelve a evaluar al reintentar.
+// =====================================================================
+
+model SyncOperation {
+  gymId String
+  id    String
+
+  userId   String?
+  type     String
+  entity   String
+  entityId String?
+  result   Json?
+
+  // Cuándo se hizo en el dispositivo (según su reloj) y cuándo se aplicó aquí.
+  clientCreatedAt DateTime
+  appliedAt       DateTime @default(now())
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@id([gymId, id])
+  @@index([gymId, appliedAt])
+}
+
+// =====================================================================
+// KIOSK ENTRIES (kiosko público sin conexión)
+// =====================================================================
+//
+// Entradas que el kiosko guardó sin internet y envió después. El kiosko no
+// puede validar nada offline, así que el servidor valida al recibirlas: las
+// válidas crean su Attendance; las rechazadas (cédula inexistente, sin
+// membresía vigente) quedan aquí para que recepción las revise. El `id` lo
+// genera el kiosko y hace idempotente el envío.
+// =====================================================================
+
+enum KioskEntryStatus {
+  APPLIED
+  REJECTED
+}
+
+model KioskEntry {
+  gymId String
+  id    String
+
+  identificationNumber String
+  // Cuándo marcó el socio en el kiosko.
+  occurredAt           DateTime
+  status               KioskEntryStatus
+  // Código del rechazo (MEMBER_NOT_FOUND, NO_ACTIVE_MEMBERSHIP, TOO_OLD).
+  reason               String?
+  attendanceId         String?
+  // Recepción ya la revisó: deja de aparecer en la lista de pendientes.
+  dismissedAt          DateTime?
+  createdAt            DateTime         @default(now())
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@id([gymId, id])
+  @@index([gymId, status, dismissedAt])
 }
 
 // =====================================================================

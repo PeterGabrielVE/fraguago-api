@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   MessageEvent,
   Param,
   ParseUUIDPipe,
@@ -90,6 +91,20 @@ export class AttendanceController {
   @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
   occupancyStream(@GymId() gymId: string): Observable<MessageEvent> {
     return this.service.occupancyStream(gymId);
+  }
+
+  // Entradas del kiosko sin conexión que el servidor rechazó al sincronizar.
+  @Get('kiosk-rejections')
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  kioskRejections(@GymId() gymId: string) {
+    return this.service.kioskRejections(gymId);
+  }
+
+  @Post('kiosk-rejections/:id/dismiss')
+  @HttpCode(200)
+  @Roles(Role.ADMIN, Role.STAFF, Role.TRAINER)
+  dismissKioskRejection(@GymId() gymId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.dismissKioskRejection(gymId, id);
   }
 
   @Post(':id/check-out')

@@ -223,12 +223,16 @@ export class GamificationService {
 
   // Hook del check-in (AttendanceService). Nunca debe romper el check-in: si
   // algo falla se loguea y la asistencia queda registrada igual.
-  async onCheckIn(gymId: string, memberId: string, attendanceId: string) {
+  // `at`: momento real de la entrada (una registrada sin conexión llega más
+  // tarde); el "primer check-in del día" se cuenta sobre ese día.
+  async onCheckIn(gymId: string, memberId: string, attendanceId: string, at = new Date()) {
     try {
-      const start = new Date();
+      const start = new Date(at);
       start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
       const todayCount = await this.prisma.attendance.count({
-        where: { gymId, memberId, checkedInAt: { gte: start } },
+        where: { gymId, memberId, checkedInAt: { gte: start, lt: end } },
       });
 
       let pointsAwarded = 0;

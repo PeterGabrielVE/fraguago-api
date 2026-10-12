@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Post,
@@ -12,6 +13,7 @@ import { Request } from 'express';
 import { AttendanceService } from './attendance.service';
 import { Public } from '../../auth/decorators/public.decorator';
 import { PublicCheckInDto } from './dto/public-check-in.dto';
+import { PublicSyncCheckInDto } from './dto/public-sync-check-in.dto';
 import { PublicCheckInLimiter, PublicCheckInThrottlerGuard } from './public-check-in.limiter';
 
 // Pantalla pública de asistencia (kiosko en la recepción). Sin token: el gym
@@ -56,5 +58,15 @@ export class PublicAttendanceController {
       if (err instanceof NotFoundException) this.limiter.recordFailure(clientKey);
       throw err;
     }
+  }
+
+  // POST /public/attendance/:slug/sync-check-in — entradas que el kiosko
+  // guardó sin conexión. Responde igual para todas (no revela cuáles eran
+  // válidas), así que no cuenta fallos de identificación.
+  @Post('sync-check-in')
+  @HttpCode(200)
+  async syncCheckIn(@Param('gymId') gymRef: string, @Body() dto: PublicSyncCheckInDto) {
+    const { id: gymId } = await this.service.resolvePublicGym(gymRef);
+    return this.service.publicSyncCheckIns(gymId, dto.sentAt, dto.entries);
   }
 }

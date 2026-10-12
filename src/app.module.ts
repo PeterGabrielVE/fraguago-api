@@ -46,6 +46,7 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
 import { ImportsModule } from './modules/imports/imports.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { SyncModule } from './modules/sync/sync.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     ImportsModule,         // bulk import from Excel/CSV
     ExportsModule,         // CSV/Excel exports
     PaymentsModule,        // payment receipts + OCR
+    SyncModule,            // offline queue: idempotent operations
   ],
   controllers: [HealthController],
   providers: [
